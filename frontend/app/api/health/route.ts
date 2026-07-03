@@ -11,6 +11,8 @@
 
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 const BACKEND = process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000";
 
 export async function GET() {
