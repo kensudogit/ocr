@@ -1,63 +1,40 @@
-#!/bin/bash
-# ──────────────────────────────────────────────────────────────────────
-# 税理士事務所向け OCR システム 起動スクリプト（開発環境）
-# ──────────────────────────────────────────────────────────────────────
+#!/bin/sh
 set -e
 
-echo "🚀 OCR仕訳システム 起動中..."
-echo ""
+echo "[start.sh] Starting OCR System..."
 
-# ── Docker が利用可能な場合は Docker Compose で起動 ──────────────────
-if command -v docker-compose &> /dev/null; then
-    echo "📦 Docker Compose で起動します..."
-    docker-compose up --build
-    exit 0
-fi
+# Start FastAPI backend on internal port 8000
+echo "[start.sh] Starting FastAPI backend on 127.0.0.1:8000..."
+cd /api
+python3 -m uvicorn src.main:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --workers "${WORKERS:-1}" &
 
-# ── ローカル開発環境（Docker なし） ─────────────────────────────────
-echo "⚠️  Docker が見つかりません。ローカル環境で起動します。"
-echo ""
-echo "前提条件:"
-echo "  - Python 3.11+"
-echo "  - Node.js 20+"
-echo "  - PostgreSQL（別途起動してください）"
-echo ""
-
-# バックエンド起動
-echo "🐍 FastAPI バックエンドを起動中 (port: 8000)..."
-cd backend
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-fi
-source venv/bin/activate
-pip install -r requirements.txt -q
-
-# .env が存在しない場合は example をコピー
-if [ ! -f ".env" ]; then
-    cp .env.example .env
-    echo "📝 .env ファイルを作成しました。データベース設定を確認してください。"
-fi
-
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload &
 BACKEND_PID=$!
-cd ..
+echo "[start.sh] Backend PID: $BACKEND_PID"
 
-# フロントエンド起動
-echo "⚛️  Next.js フロントエンドを起動中 (port: 3000)..."
-cd frontend
-npm install -q
-npm run dev &
+# Wait for backend to be ready
+echo "[start.sh] Waiting for backend to start..."
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+    echo "[start.sh] Backend is ready."
+    break
+  fi
+  sleep 1
+done
+
+# Start Next.js frontend on Railway's PORT
+echo "[start.sh] Starting Next.js frontend on port ${PORT:-3000}..."
+cd /frontend
+HOSTNAME=0.0.0.0 PORT="${PORT:-3000}" BACKEND_INTERNAL_URL="http://127.0.0.1:8000" node server.js &
+
 FRONTEND_PID=$!
-cd ..
+echo "[start.sh] Frontend PID: $FRONTEND_PID"
 
-echo ""
-echo "✅ 起動完了"
-echo "   フロントエンド: http://localhost:3000"
-echo "   バックエンドAPI: http://localhost:8000"
-echo "   API ドキュメント: http://localhost:8000/docs"
-echo ""
-echo "停止するには Ctrl+C を押してください"
+echo "[start.sh] Both services started."
+echo "[start.sh]   Frontend: http://0.0.0.0:${PORT:-3000}"
+echo "[start.sh]   Backend:  http://127.0.0.1:8000 (internal)"
 
-# 終了シグナルを受け取ったら子プロセスを終了
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT TERM
-wait
+# Keep container alive; exit if either process dies
+wait $FRONTEND_PID $BACKEND_PID

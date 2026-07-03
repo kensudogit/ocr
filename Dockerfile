@@ -1,10 +1,35 @@
-FROM python:3.11-slim
+# ============================================================
+# Combined Railway Dockerfile: Next.js (frontend) + FastAPI (backend)
+# - Next.js listens on Railway $PORT (public)
+# - FastAPI listens on 127.0.0.1:8000 (internal only)
+# - Next.js /api/* rewrites proxy to FastAPI
+# ============================================================
 
-# System dependencies for OpenCV / pdf2image / Pillow / zbar
-# build-essential required for C-extension packages (neologdn, mojimoji)
+# ── Stage 1: Build Next.js frontend ──────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+# /api prefix: Next.js rewrites proxy /api/* to FastAPI internally
+ENV NEXT_PUBLIC_API_URL=/api
+
+RUN npm run build
+
+# ── Stage 2: Runtime (Node.js base + Python) ─────────────────────────
+FROM node:20-slim
+
+# Install Python 3 + system libraries for OpenCV / PaddleOCR / etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+    python3 \
+    python3-pip \
     python3-dev \
+    build-essential \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -16,22 +41,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# ── Python backend ────────────────────────────────────────────────────
+WORKDIR /api
 
-# Copy from backend/ subdirectory (Railway build context = repo root)
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
 
 RUN mkdir -p uploads exports originals test-reports
 
-# Skip PaddleOCR model pre-download to avoid Railway build timeout
-# Models will be downloaded on first use
-# RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=True, lang='japan', show_log=False)" || true
+# ── Next.js frontend (standalone) ────────────────────────────────────
+WORKDIR /frontend
 
-EXPOSE 8000
+COPY --from=frontend-builder /frontend/.next/standalone ./
+COPY --from=frontend-builder /frontend/.next/static ./.next/static
+COPY --from=frontend-builder /frontend/public ./public
 
-# Railway injects PORT at runtime; shell form expands env vars
-CMD sh -c "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-1}"
+# ── Startup script ────────────────────────────────────────────────────
+WORKDIR /
+
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+# Railway injects PORT; Next.js uses it for the public listener
+EXPOSE 3000
+
+CMD ["/start.sh"]

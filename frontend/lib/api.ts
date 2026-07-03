@@ -1,11 +1,12 @@
 /**
  * OCR バックエンド API クライアント
  *
- * NEXT_PUBLIC_API_URL 環境変数でバックエンドURLを設定する。
- * デフォルト: http://localhost:8000
+ * - ローカル開発: NEXT_PUBLIC_API_URL=http://localhost:8000 (デフォルト)
+ * - Railway (統合デプロイ): NEXT_PUBLIC_API_URL=/api
+ *   Next.js の rewrite で /api/* → http://127.0.0.1:8000/* にプロキシされる
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ── 型定義 ──────────────────────────────────────────────────────────
 
