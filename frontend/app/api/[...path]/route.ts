@@ -1,22 +1,23 @@
 /**
- * Universal proxy: forwards /api/* → FastAPI backend (http://127.0.0.1:8000/*)
+ * Universal proxy: /api/* → FastAPI backend (http://127.0.0.1:8000/*)
  *
- * This server-side proxy avoids mixed-content errors on Railway (HTTPS page
- * trying to reach http://127.0.0.1:8000 directly from the browser).
+ * NOTE: This version avoids using `params` entirely.
+ * Next.js 16 changed how catch-all route params work; using
+ * `req.nextUrl.pathname` is more reliable across versions.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND =
-  process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000";
+const BACKEND = process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000";
 
-async function proxy(
-  req: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> }
-): Promise<NextResponse> {
-  const { path } = await params;
-  const targetPath = path.join("/");
-  const targetUrl = `${BACKEND}/${targetPath}${req.nextUrl.search}`;
+async function proxy(req: NextRequest): Promise<NextResponse> {
+  // Derive the backend path directly from the request URL.
+  // /api/health          → /health
+  // /api/documents/      → /documents/
+  // /api/upload/?foo=bar → /upload/?foo=bar
+  const pathname = req.nextUrl.pathname;
+  const backendPath = pathname.replace(/^\/api/, "") || "/";
+  const targetUrl = `${BACKEND}${backendPath}${req.nextUrl.search}`;
 
   const headers = new Headers();
   req.headers.forEach((value, key) => {
@@ -26,9 +27,10 @@ async function proxy(
   });
 
   const init: RequestInit = { method: req.method, headers };
-
   if (!["GET", "HEAD"].includes(req.method)) {
-    // @ts-ignore — duplex required for streaming body in Node.js fetch
+    // duplex: "half" is required by Node.js fetch for streaming request bodies
+    // (e.g. multipart file uploads).
+    // @ts-ignore — not yet in TS types but required at runtime
     init.duplex = "half";
     init.body = req.body;
   }
@@ -53,8 +55,20 @@ async function proxy(
   }
 }
 
-export const GET = proxy;
-export const POST = proxy;
-export const PUT = proxy;
-export const DELETE = proxy;
-export const PATCH = proxy;
+// Explicit named exports (more reliable than `export const GET = proxy`
+// across Next.js versions with Turbopack).
+export async function GET(req: NextRequest) {
+  return proxy(req);
+}
+export async function POST(req: NextRequest) {
+  return proxy(req);
+}
+export async function PUT(req: NextRequest) {
+  return proxy(req);
+}
+export async function DELETE(req: NextRequest) {
+  return proxy(req);
+}
+export async function PATCH(req: NextRequest) {
+  return proxy(req);
+}
