@@ -52,7 +52,7 @@ interface TestReportData {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function fetchTestReport(): Promise<TestReportData> {
-  const res = await fetch(`${API_BASE}/test-report/`);
+  const res = await fetch(`${API_BASE}/test-report`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

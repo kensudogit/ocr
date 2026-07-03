@@ -44,6 +44,7 @@ _test_run_state: dict = {
 }
 
 
+@router.get("", summary="テスト結果サマリー（末尾スラッシュなし）")
 @router.get("/", summary="テスト結果サマリー（JSON）")
 async def get_test_summary():
     """最後のテスト実行結果のサマリーを JSON で返す。
