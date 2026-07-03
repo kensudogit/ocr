@@ -22,19 +22,15 @@
 from __future__ import annotations
 
 import logging
+import traceback
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.api.clients import router as client_router
-from src.api.documents import router as doc_router
-from src.api.export_api import router as export_router
-from src.api.test_report import router as test_report_router
-from src.api.upload import router as upload_router
+# ── 設定・DB (起動に必須) ─────────────────────────────────────────────
 from src.config import settings
-from src.core.audit_log import audit_request_middleware
 from src.db.database import create_tables
 
 logging.basicConfig(
@@ -42,6 +38,30 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# ── オプションルーター（import 失敗しても起動継続） ───────────────────
+_import_errors: list[str] = []
+
+def _try_import(label: str, import_fn):
+    """ルーターを安全にインポートする。失敗してもアプリは起動する。"""
+    try:
+        return import_fn()
+    except Exception as exc:  # noqa: BLE001
+        msg = f"{label}: {type(exc).__name__}: {exc}"
+        logger.error("ルーター読み込み失敗 — %s\n%s", msg, traceback.format_exc())
+        _import_errors.append(msg)
+        return None
+
+upload_router    = _try_import("upload",      lambda: __import__("src.api.upload",      fromlist=["router"]).router)
+doc_router       = _try_import("documents",   lambda: __import__("src.api.documents",   fromlist=["router"]).router)
+export_router    = _try_import("export_api",  lambda: __import__("src.api.export_api",  fromlist=["router"]).router)
+client_router    = _try_import("clients",     lambda: __import__("src.api.clients",     fromlist=["router"]).router)
+test_report_router = _try_import("test_report", lambda: __import__("src.api.test_report", fromlist=["router"]).router)
+
+audit_request_middleware = _try_import(
+    "audit_log",
+    lambda: __import__("src.core.audit_log", fromlist=["audit_request_middleware"]).audit_request_middleware,
+)
 
 # ── FastAPI アプリ ────────────────────────────────────────────────────
 app = FastAPI(
@@ -76,15 +96,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 監査ログ・セキュリティヘッダミドルウェア ────────────────────────
-app.middleware("http")(audit_request_middleware)
+# ── 監査ログミドルウェア（失敗しても起動継続） ───────────────────────
+if audit_request_middleware is not None:
+    app.middleware("http")(audit_request_middleware)
 
-# ── ルーター登録 ──────────────────────────────────────────────────────
-app.include_router(upload_router)
-app.include_router(doc_router)
-app.include_router(export_router)
-app.include_router(client_router)
-app.include_router(test_report_router)
+# ── ルーター登録（None のものはスキップ） ─────────────────────────────
+for _router in [upload_router, doc_router, export_router, client_router, test_report_router]:
+    if _router is not None:
+        app.include_router(_router)
 
 # ── 静的ファイル（アップロード済み画像プレビュー用） ─────────────────
 import os as _os
@@ -266,4 +285,5 @@ async def health():
         "ocr_engine": settings.ocr_engine,
         "ai_deployment_mode": settings.ai_deployment_mode,
         "pii_masking": settings.ai_deployment_mode == "hybrid",
+        "import_errors": _import_errors,  # [] if all routers loaded OK
     }
