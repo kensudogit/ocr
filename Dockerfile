@@ -32,12 +32,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     python3-venv \
     build-essential \
+    # OpenCV runtime libraries (opencv-python-headless still needs these on slim)
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxrender1 \
     libxext6 \
+    libxfixes3 \
     libgomp1 \
+    libgthread-2.0-0 \
+    # Additional libs bundled by some opencv wheels but required on slim
+    libjpeg62-turbo \
+    libpng16-16 \
+    libtiff6 \
+    # PDF & barcode tools
     poppler-utils \
     libzbar0 \
     curl \

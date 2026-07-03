@@ -16,9 +16,17 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
+
+# OpenCV is optional: some Railway base images miss required shared libs.
+# When unavailable the preprocessor silently falls back to PIL-only mode.
+try:
+    import cv2  # type: ignore[import]
+    _CV2 = True
+except (ImportError, OSError):
+    cv2 = None  # type: ignore[assignment]
+    _CV2 = False
 
 
 @dataclass
@@ -78,6 +86,9 @@ class ImagePreprocessor:
         Returns:
             PreprocessResult: 処理済み画像と適用ステップのログ
         """
+        if not _CV2:
+            return self._process_pil_only(image_input)
+
         img = self._load_image(image_input)
         original_size = img.shape[:2]
         applied: list[str] = []
@@ -151,6 +162,41 @@ class ImagePreprocessor:
             confidence=confidence,
         )
 
+    def _process_pil_only(
+        self,
+        image_input: bytes | str | Path | np.ndarray,
+    ) -> PreprocessResult:
+        """OpenCV が利用できない場合の PIL フォールバック前処理。"""
+        if isinstance(image_input, np.ndarray):
+            pil_img = Image.fromarray(image_input).convert("RGB")
+        elif isinstance(image_input, (str, Path)):
+            pil_img = Image.open(str(image_input)).convert("RGB")
+        else:
+            pil_img = Image.open(io.BytesIO(image_input)).convert("RGB")  # type: ignore[arg-type]
+
+        original_size = (pil_img.height, pil_img.width)
+
+        # Minimum upscale
+        if pil_img.height < self.MIN_HEIGHT:
+            scale = self.MIN_HEIGHT / pil_img.height
+            pil_img = pil_img.resize(
+                (int(pil_img.width * scale), int(pil_img.height * scale)),
+                Image.LANCZOS,
+            )
+
+        gray = pil_img.convert("L")
+        # Light sharpening
+        enhanced = ImageEnhance.Sharpness(gray).enhance(2.0)
+        arr = np.array(enhanced)
+        return PreprocessResult(
+            image=arr,
+            pil_image=enhanced,
+            applied_steps=["pil_fallback"],
+            original_size=original_size,
+            final_size=(enhanced.height, enhanced.width),
+            confidence=0.75,
+        )
+
     def process_pdf_page(self, page_image: np.ndarray, page_num: int = 0) -> PreprocessResult:
         """PDFページ画像の前処理。
 
@@ -168,17 +214,16 @@ class ImagePreprocessor:
         if isinstance(src, np.ndarray):
             return src.copy()
         if isinstance(src, (str, Path)):
-            img = cv2.imread(str(src))
+            img = cv2.imread(str(src))  # type: ignore[union-attr]
             if img is None:
                 raise ValueError(f"画像を読み込めませんでした: {src}")
             return img
         if isinstance(src, bytes):
             arr = np.frombuffer(src, dtype=np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)  # type: ignore[union-attr]
             if img is None:
-                # TIFF等の対応拡張子を試みる
                 pil_img = Image.open(io.BytesIO(src)).convert("RGB")
-                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)  # type: ignore[union-attr]
             return img
         raise TypeError(f"未対応の入力型: {type(src)}")
 
