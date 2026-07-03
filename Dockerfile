@@ -16,9 +16,8 @@ RUN npm ci
 COPY frontend/ .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-# /api prefix: Next.js rewrites proxy /api/* to FastAPI internally
-ENV NEXT_PUBLIC_API_URL=/api
-
+# NEXT_PUBLIC_API_URL defaults to "/api" in lib/api.ts
+# /api/* is proxied server-side by app/api/[...path]/route.ts → FastAPI
 RUN npm run build
 
 # ── Stage 2: Runtime (Node.js base + Python) ─────────────────────────

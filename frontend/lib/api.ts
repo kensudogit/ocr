@@ -1,12 +1,13 @@
 /**
  * OCR バックエンド API クライアント
  *
- * - ローカル開発: NEXT_PUBLIC_API_URL=http://localhost:8000 (デフォルト)
- * - Railway (統合デプロイ): NEXT_PUBLIC_API_URL=/api
- *   Next.js の rewrite で /api/* → http://127.0.0.1:8000/* にプロキシされる
+ * - ローカル開発: NEXT_PUBLIC_API_URL=http://localhost:8000 (.env.local で設定)
+ * - Railway/本番: NEXT_PUBLIC_API_URL 未設定 → "/api" を使用
+ *   /api/* は app/api/[...path]/route.ts がサーバーサイドで FastAPI へプロキシ
+ *   これによりブラウザが直接バックエンドへ接続しない（HTTPS混在エラー回避）
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 // ── 型定義 ──────────────────────────────────────────────────────────
 
