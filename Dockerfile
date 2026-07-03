@@ -45,12 +45,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /api
 
 COPY backend/requirements.txt .
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+
+# PEP 668: node:20-slim (Debian Bookworm) blocks global pip install.
+# Use a virtualenv instead of --break-system-packages.
+RUN python3 -m venv /venv && \
+    /venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /venv/bin/pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
 
 RUN mkdir -p uploads exports originals test-reports
+
+# Always use the venv python/uvicorn
+ENV PATH="/venv/bin:$PATH"
 
 # ── Next.js frontend (standalone) ────────────────────────────────────
 WORKDIR /frontend

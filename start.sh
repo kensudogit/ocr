@@ -6,7 +6,7 @@ echo "[start.sh] Starting OCR System..."
 # Start FastAPI backend on internal port 8000
 echo "[start.sh] Starting FastAPI backend on 127.0.0.1:8000..."
 cd /api
-python3 -m uvicorn src.main:app \
+/venv/bin/uvicorn src.main:app \
   --host 127.0.0.1 \
   --port 8000 \
   --workers "${WORKERS:-1}" &
