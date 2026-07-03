@@ -104,6 +104,20 @@ async def startup() -> None:
     logger.info("起動完了 — %s v%s", settings.app_name, settings.app_version)
 
 
+# ── ルート ───────────────────────────────────────────────────────────
+@app.get("/", tags=["system"])
+async def root():
+    """ルートエンドポイント — API 情報を返す。"""
+    return {
+        "app": settings.app_name,
+        "version": settings.app_version,
+        "status": "running",
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "health": "/health",
+    }
+
+
 # ── ヘルスチェック ────────────────────────────────────────────────────
 @app.get("/health", tags=["system"])
 async def health():
