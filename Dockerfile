@@ -44,13 +44,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Python backend ────────────────────────────────────────────────────
 WORKDIR /api
 
-COPY backend/requirements.txt .
+COPY backend/requirements.txt backend/requirements-railway.txt ./
 
 # PEP 668: node:20-slim (Debian Bookworm) blocks global pip install.
 # Use a virtualenv instead of --break-system-packages.
+# requirements-railway.txt omits paddlepaddle/paddleocr (too large for Railway
+# free tier) and other optional heavy packages not needed for PoC.
 RUN python3 -m venv /venv && \
     /venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /venv/bin/pip install --no-cache-dir -r requirements.txt
+    /venv/bin/pip install --no-cache-dir -r requirements-railway.txt
 
 COPY backend/ .
 
@@ -70,7 +72,8 @@ COPY --from=frontend-builder /frontend/public ./public
 WORKDIR /
 
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+# Strip Windows CRLF line endings that break bash on Linux
+RUN sed -i 's/\r//' /start.sh && chmod +x /start.sh
 
 # Railway injects PORT; Next.js uses it for the public listener
 EXPOSE 3000
