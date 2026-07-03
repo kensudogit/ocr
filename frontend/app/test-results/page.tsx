@@ -47,7 +47,9 @@ interface TestReportData {
 
 // ── ユーティリティ ────────────────────────────────────────────────────
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// In production (Railway) NEXT_PUBLIC_API_URL is not set; default to /api
+// so all requests go through the Next.js server-side proxy (no CORS issues).
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function fetchTestReport(): Promise<TestReportData> {
   const res = await fetch(`${API_BASE}/test-report/`);

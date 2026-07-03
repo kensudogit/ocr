@@ -14,7 +14,8 @@ import {
   type ExtractedData,
 } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Default to /api so requests are proxied server-side (no CORS in production).
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 // ── 信頼度ティアの表示 ──────────────────────────────────────────────
 const TIER_CONFIG = {

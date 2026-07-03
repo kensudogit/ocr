@@ -16,8 +16,10 @@ RUN npm ci
 COPY frontend/ .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-# NEXT_PUBLIC_API_URL defaults to "/api" in lib/api.ts
-# /api/* is proxied server-side by app/api/[...path]/route.ts → FastAPI
+# Set NEXT_PUBLIC_API_URL=/api at build time so client-side code routes all
+# API calls through the Next.js server-side proxy (app/api/[...path]/route.ts)
+# instead of connecting directly to localhost:8000 (CORS/mixed-content error).
+ENV NEXT_PUBLIC_API_URL=/api
 RUN npm run build
 
 # ── Stage 2: Runtime (Node.js base + Python) ─────────────────────────

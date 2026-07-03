@@ -4,9 +4,9 @@ dockerfilePath = "Dockerfile"
 buildContext = "."
 
 [build.args]
-# Replace with your Railway backend service URL after deploying backend
-# NEXT_PUBLIC_API_URL = "https://ocr-backend-production.railway.app"
-NEXT_PUBLIC_API_URL = "http://localhost:8000"
+# /api routes are proxied by Next.js server-side (app/api/[...path]/route.ts)
+# so no direct backend URL is needed in the browser.
+NEXT_PUBLIC_API_URL = "/api"
 
 [deploy]
 startCommand = "node server.js"
