@@ -25,6 +25,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.clients import router as client_router
@@ -105,17 +106,153 @@ async def startup() -> None:
 
 
 # ── ルート ───────────────────────────────────────────────────────────
-@app.get("/", tags=["system"])
+@app.get("/", response_class=HTMLResponse, tags=["system"])
 async def root():
-    """ルートエンドポイント — API 情報を返す。"""
-    return {
-        "app": settings.app_name,
-        "version": settings.app_version,
-        "status": "running",
-        "docs": "/docs",
-        "redoc": "/redoc",
-        "health": "/health",
-    }
+    """サービス案内ページ。"""
+    html = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{settings.app_name}</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #f1f5f9;
+    }}
+    .container {{
+      max-width: 720px;
+      width: 90%;
+      padding: 48px 40px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 24px;
+      backdrop-filter: blur(12px);
+    }}
+    .badge {{
+      display: inline-block;
+      background: #22c55e20;
+      color: #4ade80;
+      border: 1px solid #22c55e40;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      margin-bottom: 20px;
+      letter-spacing: 0.05em;
+    }}
+    h1 {{
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }}
+    .version {{
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }}
+    .description {{
+      color: #cbd5e1;
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 32px;
+    }}
+    @media (max-width: 500px) {{
+      .grid {{ grid-template-columns: 1fr; }}
+    }}
+    .card {{
+      display: block;
+      text-decoration: none;
+      padding: 16px 20px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      transition: all 0.2s;
+    }}
+    .card:hover {{
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(99,102,241,0.5);
+      transform: translateY(-2px);
+    }}
+    .card-icon {{ font-size: 22px; margin-bottom: 8px; }}
+    .card-title {{ font-size: 14px; font-weight: 600; color: #f1f5f9; }}
+    .card-desc {{ font-size: 12px; color: #94a3b8; margin-top: 2px; }}
+    .status-bar {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: rgba(34,197,94,0.1);
+      border: 1px solid rgba(34,197,94,0.2);
+      border-radius: 10px;
+      font-size: 13px;
+      color: #4ade80;
+    }}
+    .dot {{
+      width: 8px; height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }}
+    @keyframes pulse {{
+      0%, 100% {{ opacity: 1; }}
+      50% {{ opacity: 0.4; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badge">✓ RUNNING</div>
+    <h1>🧾 {settings.app_name}</h1>
+    <div class="version">v{settings.app_version} &nbsp;·&nbsp; FastAPI バックエンド</div>
+    <p class="description">
+      税理士事務所向け AI-OCR 自動仕訳システム。<br>
+      領収書・請求書の画像から仕訳データを自動生成し、
+      freee / マネーフォワード / 弥生会計へエクスポートします。
+    </p>
+    <div class="grid">
+      <a href="/docs" class="card">
+        <div class="card-icon">📚</div>
+        <div class="card-title">API ドキュメント</div>
+        <div class="card-desc">Swagger UI でインタラクティブに試せます</div>
+      </a>
+      <a href="/redoc" class="card">
+        <div class="card-icon">📖</div>
+        <div class="card-title">ReDoc</div>
+        <div class="card-desc">見やすい API リファレンス</div>
+      </a>
+      <a href="/health" class="card">
+        <div class="card-icon">💚</div>
+        <div class="card-title">ヘルスチェック</div>
+        <div class="card-desc">サービス稼働状況の確認</div>
+      </a>
+      <a href="/upload/" class="card">
+        <div class="card-icon">📤</div>
+        <div class="card-title">アップロード API</div>
+        <div class="card-desc">書類のアップロード・OCR 処理</div>
+      </a>
+    </div>
+    <div class="status-bar">
+      <div class="dot"></div>
+      バックエンド API は正常稼働中です
+    </div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 # ── ヘルスチェック ────────────────────────────────────────────────────
