@@ -24,17 +24,28 @@ class Settings(BaseSettings):
 
     @property
     def database_url_normalized(self) -> str:
-        """Normalize DATABASE_URL for the correct async driver."""
+        """Normalize DATABASE_URL for the correct async driver (asyncpg).
+
+        - postgres:// / postgresql:// → postgresql+asyncpg://
+        - Railway *internal* URLs (*.railway.internal) do NOT support SSL;
+          Railway *external* URLs (*.railway.app / *.up.railway.app) require SSL.
+        """
         url = self.database_url
-        # Railway PostgreSQL: postgres:// → postgresql+psycopg://
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+psycopg://", 1)
-        elif url.startswith("postgresql://") and "+psycopg" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-        # Railway external connections require SSL (add if not already specified)
-        if "postgresql+psycopg" in url and "sslmode" not in url:
+        if url.startswith("sqlite"):
+            return url
+        # Normalise scheme to postgresql+asyncpg
+        for prefix in ("postgres://", "postgresql://", "postgresql+psycopg://",
+                       "postgresql+psycopg2://"):
+            if url.startswith(prefix):
+                url = "postgresql+asyncpg://" + url[len(prefix):]
+                break
+        # Only append sslmode for external (non-internal) connections.
+        # railway.internal hosts are reached over Railway's private network
+        # and do NOT support SSL; adding sslmode=require would break them.
+        is_internal = ".railway.internal" in url or "localhost" in url or "127.0.0.1" in url
+        if not is_internal and "ssl" not in url:
             sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}sslmode=require"
+            url = f"{url}{sep}ssl=true"
         return url
 
     @property

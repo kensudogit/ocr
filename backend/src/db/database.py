@@ -1,6 +1,7 @@
 """データベース接続・セッション管理モジュール。"""
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -8,15 +9,38 @@ from sqlalchemy.orm import DeclarativeBase
 
 from src.config import settings
 
+logger = logging.getLogger(__name__)
+
+# Build engine kwargs based on the backend type.
+# asyncpg (PostgreSQL) and aiosqlite (SQLite) have different requirements.
 _engine_kwargs: dict = {"echo": settings.debug}
-if not settings.is_sqlite:
-    # PostgreSQL supports connection pooling; SQLite does not
-    _engine_kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
-else:
+if settings.is_sqlite:
     # SQLite requires check_same_thread=False for async use
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # PostgreSQL / asyncpg connection pool settings
+    _engine_kwargs.update({
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+    })
 
-engine = create_async_engine(settings.database_url_normalized, **_engine_kwargs)
+try:
+    engine = create_async_engine(settings.database_url_normalized, **_engine_kwargs)
+    logger.info("DB engine created: %s", settings.database_url_normalized.split("@")[-1])
+except Exception as _exc:  # noqa: BLE001
+    # Fall back to in-memory SQLite so the app can still start if the
+    # primary database is misconfigured.  Errors will be visible in the logs.
+    logger.error(
+        "DB engine creation failed (%s) — falling back to SQLite: %s",
+        type(_exc).__name__,
+        _exc,
+    )
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///./ocr-fallback.db",
+        connect_args={"check_same_thread": False},
+        echo=settings.debug,
+    )
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

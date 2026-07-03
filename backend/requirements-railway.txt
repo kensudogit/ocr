@@ -12,7 +12,9 @@ aiofiles==23.2.1
 # ── Database ───────────────────────────────────────────────────────────────
 sqlalchemy==2.0.36
 alembic==1.14.0
-psycopg[binary]==3.2.3
+# asyncpg: pure-Python async PostgreSQL driver, no system libpq required.
+# psycopg binary is omitted to avoid shared-library issues on node:20-slim.
+asyncpg==0.30.0
 aiosqlite==0.20.0
 
 # ── Config ─────────────────────────────────────────────────────────────────
