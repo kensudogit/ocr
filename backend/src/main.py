@@ -117,10 +117,10 @@ app = FastAPI(
 """,
     docs_url="/docs",
     redoc_url="/redoc",
-    # Prevent FastAPI from redirecting /documents → /documents/ (307).
-    # The Next.js proxy passes 307 back to the browser, which then follows
-    # the redirect to a path without /api/ prefix → "Not Found".
-    redirect_slashes=False,
+    # redirect_slashes=True (default): FastAPI redirects /documents → /documents/ with 307.
+    # The Next.js proxy uses redirect:"follow" so it follows the 307 internally and
+    # returns 200 to the browser. Do NOT set redirect_slashes=False — that turns the
+    # redirect into a 404 because routes are defined with trailing slashes.
 )
 
 # ── CORS ─────────────────────────────────────────────────────────────

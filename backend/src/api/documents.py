@@ -58,6 +58,7 @@ class DocumentListResponse(BaseModel):
 
 # ── エンドポイント ────────────────────────────────────────────────────
 
+@router.get("", summary="書類一覧取得（末尾スラッシュなし）")
 @router.get("/", summary="書類一覧取得")
 async def list_documents(
     status: str | None = Query(None, description="フィルタ: uploaded/pending/approved等"),

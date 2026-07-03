@@ -140,7 +140,7 @@ export const documentsApi = {
     if (params?.doc_type) qs.set("doc_type", params.doc_type);
     if (params?.page) qs.set("page", String(params.page));
     if (params?.page_size) qs.set("page_size", String(params.page_size));
-    return request<DocumentListResponse>(`/documents/?${qs}`);
+    return request<DocumentListResponse>(`/documents?${qs}`);
   },
 
   /** 書類詳細取得 */
@@ -183,7 +183,7 @@ export const uploadApi = {
     const form = new FormData();
     form.append("file", file);
     const qs = new URLSearchParams({ auto_process: String(autoProcess) });
-    return request<{ document_id: string; status: string }>(`/upload/?${qs}`, {
+    return request<{ document_id: string; status: string }>(`/upload?${qs}`, {
       method: "POST",
       body: form,
     });
@@ -215,7 +215,7 @@ export const exportApi = {
   export: async (fmt: string, docIds?: string[]) => {
     const qs = new URLSearchParams({ fmt });
     if (docIds?.length) docIds.forEach((id) => qs.append("doc_ids", id));
-    const res = await fetch(`${BASE_URL}/export/?${qs}`, { method: "POST" });
+    const res = await fetch(`${BASE_URL}/export?${qs}`, { method: "POST" });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`エクスポートエラー: ${body}`);

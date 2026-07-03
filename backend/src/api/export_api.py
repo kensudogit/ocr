@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter(prefix="/export", tags=["export"])
 
 
+@router.post("", summary="承認済み書類をエクスポート（末尾スラッシュなし）")
 @router.post("/", summary="承認済み書類をエクスポート")
 async def export_documents(
     fmt: str = Query("freee", description="エクスポート形式: freee / money_forward / yayoi / generic_csv"),
