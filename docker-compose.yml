@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ── PostgreSQL ────────────────────────────────────────────────────
   db:
@@ -36,10 +34,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      # Force local builder (avoids Docker Build Cloud path resolution issues)
-      x-bake:
-        platforms:
-          - linux/amd64
     container_name: ocr_backend
     ports:
       - "8000:8000"
@@ -106,9 +100,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      x-bake:
-        platforms:
-          - linux/amd64
     container_name: ocr_frontend
     ports:
       - "3000:3000"
