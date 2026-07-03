@@ -8,11 +8,14 @@ RUN npm ci
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Accept API URL as build arg so Railway can inject the backend service URL
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 RUN npm run build
 
-# ── ランタイム ────────────────────────────────────────────────────────
+# ── Runtime ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
 WORKDIR /app
@@ -24,6 +27,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-EXPOSE 3000
+# Railway injects PORT; Next.js standalone server reads it automatically
+EXPOSE ${PORT:-3000}
 
 CMD ["node", "server.js"]

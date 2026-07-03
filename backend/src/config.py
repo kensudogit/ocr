@@ -17,7 +17,18 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── データベース ──────────────────────────────────────────
+    # Railway injects DATABASE_URL as "postgresql://..." — normalize to psycopg3 scheme
     database_url: str = "postgresql+psycopg://ocr:ocr_pass@localhost:5432/ocr_db"
+
+    @property
+    def database_url_normalized(self) -> str:
+        """psycopg3 requires postgresql+psycopg:// scheme."""
+        url = self.database_url
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif url.startswith("postgresql://") and "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url
 
     # ── ファイル保存 ──────────────────────────────────────────
     upload_dir: str = str(Path(__file__).parent.parent / "uploads")

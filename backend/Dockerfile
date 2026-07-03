@@ -29,6 +29,7 @@ RUN mkdir -p uploads exports originals test-reports
 # Pre-download PaddleOCR Japanese model to speed up first run
 RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=True, lang='japan', show_log=False)" || true
 
-EXPOSE 8000
+EXPOSE ${PORT:-8000}
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Use shell form so $PORT env var is expanded at runtime (required for Railway)
+CMD sh -c "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2}"
