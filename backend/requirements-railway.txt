@@ -14,7 +14,7 @@ sqlalchemy==2.0.36
 alembic==1.14.0
 # asyncpg: pure-Python async PostgreSQL driver, no system libpq required.
 # psycopg binary is omitted to avoid shared-library issues on node:20-slim.
-asyncpg==0.30.0
+asyncpg>=0.29.0
 aiosqlite==0.20.0
 
 # ── Config ─────────────────────────────────────────────────────────────────
