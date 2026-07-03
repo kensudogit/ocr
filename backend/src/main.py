@@ -94,9 +94,13 @@ if _os.path.isdir(settings.upload_dir):
 # ── ライフサイクル ────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup() -> None:
-    """アプリ起動時にDBテーブルを作成する。"""
-    logger.info("データベーステーブルを初期化中...")
-    await create_tables()
+    """アプリ起動時にDBテーブルを作成する。DB未接続でも起動継続する。"""
+    try:
+        logger.info("データベーステーブルを初期化中...")
+        await create_tables()
+        logger.info("DB初期化完了")
+    except Exception as exc:
+        logger.warning("DB初期化スキップ（接続不可）: %s", exc)
     logger.info("起動完了 — %s v%s", settings.app_name, settings.app_version)
 
 
