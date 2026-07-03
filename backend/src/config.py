@@ -31,6 +31,10 @@ class Settings(BaseSettings):
             url = url.replace("postgres://", "postgresql+psycopg://", 1)
         elif url.startswith("postgresql://") and "+psycopg" not in url:
             url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        # Railway external connections require SSL (add if not already specified)
+        if "postgresql+psycopg" in url and "sslmode" not in url:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}sslmode=require"
         return url
 
     @property
