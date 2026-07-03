@@ -26,13 +26,22 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
     }
   });
 
-  const init: RequestInit = { method: req.method, headers };
+  const init: RequestInit = {
+    method: req.method,
+    headers,
+    // Follow 307/308 redirects internally so the browser never sees a redirect
+    // to http://127.0.0.1:8000/... (unreachable from browser).
+    redirect: "follow",
+  };
   if (!["GET", "HEAD"].includes(req.method)) {
     // duplex: "half" is required by Node.js fetch for streaming request bodies
-    // (e.g. multipart file uploads).
+    // (e.g. multipart file uploads). redirect must be "manual" for POST bodies
+    // to avoid issues with redirect + body; FastAPI won't 307 POST requests.
     // @ts-ignore — not yet in TS types but required at runtime
     init.duplex = "half";
     init.body = req.body;
+    // For non-GET requests keep redirect manual to preserve body on redirect
+    (init as RequestInit).redirect = "manual";
   }
 
   try {

@@ -97,8 +97,8 @@ audit_request_middleware = _try_import(
 
 # ── FastAPI アプリ ────────────────────────────────────────────────────
 app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
+    title=getattr(settings, "app_name", "税理士OCRシステム"),
+    version=getattr(settings, "app_version", "1.0.0"),
     description="""
 ## 税理士事務所向け OCR 自動仕訳システム
 
@@ -117,13 +117,19 @@ app = FastAPI(
 """,
     docs_url="/docs",
     redoc_url="/redoc",
+    # Prevent FastAPI from redirecting /documents → /documents/ (307).
+    # The Next.js proxy passes 307 back to the browser, which then follows
+    # the redirect to a path without /api/ prefix → "Not Found".
+    redirect_slashes=False,
 )
 
 # ── CORS ─────────────────────────────────────────────────────────────
+# All browser→backend traffic goes through the Next.js server-side proxy,
+# so the Origin is irrelevant. Allow "*" to avoid accidental CORS blocks.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,  # must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
