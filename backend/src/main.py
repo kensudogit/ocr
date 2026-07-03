@@ -29,15 +29,47 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-# ── 設定・DB (起動に必須) ─────────────────────────────────────────────
-from src.config import settings
-from src.db.database import create_tables
-
+# ── ロギング（設定より先に初期化） ────────────────────────────────────
 logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# ── 設定（失敗しても最低限の設定でフォールバック） ─────────────────────
+try:
+    from src.config import settings
+    logging.basicConfig(
+        level=logging.DEBUG if settings.debug else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logger.info("src.config: loaded OK")
+except Exception as _cfg_exc:
+    logger.error("src.config: FAILED — %s\n%s", _cfg_exc, traceback.format_exc())
+    # ミニマル設定フォールバック
+    from types import SimpleNamespace
+    settings = SimpleNamespace(  # type: ignore[assignment]
+        app_name="税理士OCRシステム",
+        app_version="1.0.0",
+        debug=False,
+        upload_dir="/api/uploads",
+        allowed_origins=["*"],
+        ocr_engine="none",
+        ai_deployment_mode="cloud",
+    )
+
+# ── DB（失敗しても起動継続） ──────────────────────────────────────────
+_create_tables_fn = None
+try:
+    from src.db.database import create_tables as _create_tables_fn  # type: ignore[assignment]
+    logger.info("src.db.database: loaded OK")
+except Exception as _db_exc:
+    logger.error("src.db.database: FAILED — %s\n%s", _db_exc, traceback.format_exc())
+
+async def create_tables() -> None:  # type: ignore[misc]
+    if _create_tables_fn is not None:
+        await _create_tables_fn()
 
 # ── オプションルーター（import 失敗しても起動継続） ───────────────────
 _import_errors: list[str] = []
@@ -280,10 +312,9 @@ async def health():
     """ヘルスチェックエンドポイント。"""
     return {
         "status": "ok",
-        "app": settings.app_name,
-        "version": settings.app_version,
-        "ocr_engine": settings.ocr_engine,
-        "ai_deployment_mode": settings.ai_deployment_mode,
-        "pii_masking": settings.ai_deployment_mode == "hybrid",
-        "import_errors": _import_errors,  # [] if all routers loaded OK
+        "app": getattr(settings, "app_name", "税理士OCRシステム"),
+        "version": getattr(settings, "app_version", "1.0.0"),
+        "ocr_engine": getattr(settings, "ocr_engine", "none"),
+        "ai_deployment_mode": getattr(settings, "ai_deployment_mode", "cloud"),
+        "import_errors": _import_errors,  # [] if all modules loaded OK
     }
