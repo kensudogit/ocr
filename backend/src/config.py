@@ -17,18 +17,25 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── データベース ──────────────────────────────────────────
-    # Railway injects DATABASE_URL as "postgresql://..." — normalize to psycopg3 scheme
-    database_url: str = "postgresql+psycopg://ocr:ocr_pass@localhost:5432/ocr_db"
+    # Default: SQLite (works without external DB, good for PoC / Railway)
+    # Set DATABASE_URL env var to use PostgreSQL:
+    #   postgresql+psycopg://user:pass@host:5432/db
+    database_url: str = "sqlite+aiosqlite:///./ocr.db"
 
     @property
     def database_url_normalized(self) -> str:
-        """psycopg3 requires postgresql+psycopg:// scheme."""
+        """Normalize DATABASE_URL for the correct async driver."""
         url = self.database_url
+        # Railway PostgreSQL: postgres:// → postgresql+psycopg://
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+psycopg://", 1)
         elif url.startswith("postgresql://") and "+psycopg" not in url:
             url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         return url
+
+    @property
+    def is_sqlite(self) -> bool:
+        return "sqlite" in self.database_url
 
     # ── ファイル保存 ──────────────────────────────────────────
     upload_dir: str = str(Path(__file__).parent.parent / "uploads")

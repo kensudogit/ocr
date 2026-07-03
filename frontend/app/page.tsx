@@ -171,11 +171,21 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="rounded-xl bg-red-50 border border-red-200 p-6 text-center">
-        <p className="text-red-600 font-medium">バックエンドに接続できません</p>
-        <p className="text-sm text-red-500 mt-1">{error}</p>
-        <p className="text-xs text-slate-500 mt-3">
-          バックエンドサーバーを起動してください: <code>uvicorn src.main:app --reload</code>
-        </p>
+        <p className="text-red-600 font-medium text-lg">バックエンドに接続できません</p>
+        <p className="text-sm text-red-500 mt-1">API エラー — {error}</p>
+        <div className="mt-4 text-sm text-slate-600 space-y-1">
+          <p>考えられる原因:</p>
+          <ul className="list-disc list-inside text-left inline-block mt-1 space-y-1">
+            <li>バックエンドサービスが起動中（しばらくお待ちください）</li>
+            <li>データベース接続エラー（Railway に PostgreSQL を追加してください）</li>
+          </ul>
+        </div>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+        >
+          再読み込み
+        </button>
       </div>
     );
   }

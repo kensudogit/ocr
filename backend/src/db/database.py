@@ -8,13 +8,15 @@ from sqlalchemy.orm import DeclarativeBase
 
 from src.config import settings
 
-engine = create_async_engine(
-    settings.database_url_normalized,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    echo=settings.debug,
-)
+_engine_kwargs: dict = {"echo": settings.debug}
+if not settings.is_sqlite:
+    # PostgreSQL supports connection pooling; SQLite does not
+    _engine_kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
+else:
+    # SQLite requires check_same_thread=False for async use
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_async_engine(settings.database_url_normalized, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
