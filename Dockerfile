@@ -40,7 +40,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxfixes3 \
     libgomp1 \
-    libgthread-2.0-0 \
     # Additional libs bundled by some opencv wheels but required on slim
     libjpeg62-turbo \
     libpng16-16 \
