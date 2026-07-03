@@ -1,0 +1,30 @@
+[run]
+source = src
+omit =
+    src/__init__.py
+    src/db/database.py
+    src/db/models.py
+    tests/*
+    */__pycache__/*
+    */migrations/*
+
+[report]
+exclude_lines =
+    # 抽象メソッド・プロトコル
+    @abstractmethod
+    @overload
+    raise NotImplementedError
+    # テスト・デバッグ除外
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    pragma: no cover
+
+show_missing = true
+precision = 1
+
+[html]
+directory = test-reports/coverage
+title = OCR システム カバレッジレポート
+
+[xml]
+output = test-reports/coverage.xml

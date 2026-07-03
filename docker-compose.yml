@@ -1,0 +1,115 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: ocr_db
+    environment:
+      POSTGRES_DB:       ocr_db
+      POSTGRES_USER:     ocr
+      POSTGRES_PASSWORD: ocr_pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocr -d ocr_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis（バッチ処理キュー用） ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ocr_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI バックエンド ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ocr_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL:          postgresql+psycopg://ocr:ocr_pass@db:5432/ocr_db
+      REDIS_URL:             redis://redis:6379/0
+      OCR_ENGINE:            auto
+      ENHANCE_THERMAL_PAPER: "true"
+      AUTO_ROTATE:           "true"
+      DENOISE_LEVEL:         "2"
+      ALLOWED_ORIGINS:       '["http://localhost:3000","http://localhost:3001"]'
+      DEBUG:                 "false"
+      # ── AI デプロイメントモード ─────────────────────────────────
+      # cloud / hybrid / bedrock / vertex / onprem
+      AI_DEPLOYMENT_MODE:    "${AI_DEPLOYMENT_MODE:-cloud}"
+      # ── VLM API キー ─────────────────────────────────────────
+      OPENAI_API_KEY:        "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL:          "${OPENAI_MODEL:-gpt-4o-mini}"
+      GEMINI_API_KEY:        "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL:          "${GEMINI_MODEL:-gemini-2.0-flash}"
+      # ── AWS Bedrock（国内固定 ③ bedrock モード） ──────────────
+      AWS_REGION:            "${AWS_REGION:-ap-northeast-1}"
+      AWS_ACCESS_KEY_ID:     "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      BEDROCK_MODEL_ID:      "${BEDROCK_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}"
+      # ── Google Vertex AI（国内固定 ④ vertex モード） ──────────
+      GCP_PROJECT_ID:        "${GCP_PROJECT_ID:-}"
+      VERTEX_LOCATION:       "${VERTEX_LOCATION:-asia-northeast1}"
+      # ── freee 公式 API ────────────────────────────────────────
+      FREEE_CLIENT_ID:       "${FREEE_CLIENT_ID:-}"
+      FREEE_CLIENT_SECRET:   "${FREEE_CLIENT_SECRET:-}"
+      FREEE_ACCESS_TOKEN:    "${FREEE_ACCESS_TOKEN:-}"
+      FREEE_COMPANY_ID:      "${FREEE_COMPANY_ID:-}"
+      # ── PII マスク設定 ────────────────────────────────────────
+      PII_MASK_BANK_ACCOUNTS: "${PII_MASK_BANK_ACCOUNTS:-true}"
+      PII_MASK_MY_NUMBER:    "${PII_MASK_MY_NUMBER:-true}"
+      PII_MASK_CARD_NUMBERS: "${PII_MASK_CARD_NUMBERS:-true}"
+      # ── 電子帳簿保存法 ────────────────────────────────────────
+      ORIGINALS_DIR:         /app/originals
+      SCAN_MIN_DPI:          "200"
+      # ── セキュリティ ──────────────────────────────────────────
+      SECRET_KEY:            "${SECRET_KEY:-change-me-in-production}"
+      ENCRYPT_STORED_FILES:  "${ENCRYPT_STORED_FILES:-false}"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/exports:/app/exports
+      - ./backend/originals:/app/originals   # 電子帳簿保存法: 原本保管
+      # PaddleOCR モデルキャッシュ（初回DL後に再利用）
+      - paddleocr_cache:/root/.paddleocr
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s  # PaddleOCR モデルのダウンロード時間を考慮
+
+  # ── Next.js フロントエンド ────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ocr_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  paddleocr_cache:
