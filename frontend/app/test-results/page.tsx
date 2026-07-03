@@ -436,7 +436,7 @@ function Grid({
             最終実行: {new Date(runState.completed_at).toLocaleString("ja-JP")}
           </span>
         )}
-        {runState?.exit_code !== null && (
+        {runState != null && runState.exit_code !== null && (
           <span
             className={runState.exit_code === 0 ? "text-green-600" : "text-red-600"}
           >

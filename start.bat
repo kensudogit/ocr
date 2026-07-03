@@ -8,9 +8,18 @@ echo.
 echo [INFO] Starting OCR Accounting System...
 echo.
 
+REM Disable Docker Build Cloud to use local builder
+SET BUILDX_NO_DEFAULT_LOAD=1
+
 REM Check Docker Compose
 WHERE docker >nul 2>&1
 IF %ERRORLEVEL% EQU 0 (
+    REM Use local builder to avoid Docker Build Cloud (Metal builder) path issues
+    docker buildx use desktop-linux >nul 2>&1
+    IF %ERRORLEVEL% NEQ 0 (
+        docker buildx use default >nul 2>&1
+    )
+
     WHERE docker-compose >nul 2>&1
     IF %ERRORLEVEL% EQU 0 (
         echo [INFO] Starting with Docker Compose...

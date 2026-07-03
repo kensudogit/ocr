@@ -1,7 +1,10 @@
 FROM python:3.11-slim
 
-# System dependencies for OpenCV / pdf2image / Pillow / zbar
+# System dependencies + build tools for C-extension Python packages
+# (neologdn, mojimoji, etc. require gcc/g++ to compile)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
     libgl1 \
     libglib2.0-0 \
     libsm6 \

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   documentsApi,
@@ -523,8 +523,8 @@ function ExtractionForm({
   );
 }
 
-// ── メインページ ────────────────────────────────────────────────────
-export default function ReviewPage() {
+// ── メインページ（内部コンポーネント） ──────────────────────────────
+function ReviewPageInner() {
   const params = useSearchParams();
   const initialId = params.get("id");
 
@@ -695,5 +695,14 @@ export default function ReviewPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary in Next.js App Router
+export default function ReviewPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-slate-400">読み込み中...</div>}>
+      <ReviewPageInner />
+    </Suspense>
   );
 }
