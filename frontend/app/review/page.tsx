@@ -282,28 +282,39 @@ function ExtractionForm({
   onReprocess: () => Promise<void>;
 }) {
   const ex = detail.extracted;
-  const [form, setForm] = useState<Partial<ExtractedData>>({
-    transaction_date: ex?.transaction_date?.split("T")[0] ?? null,
-    vendor_name:      ex?.vendor_name ?? null,
-    vendor_address:   ex?.vendor_address ?? null,
-    vendor_phone:     ex?.vendor_phone ?? null,
-    vendor_registration_no: ex?.vendor_registration_no ?? null,
-    total_amount:     ex?.total_amount ?? null,
-    subtotal_amount:  ex?.subtotal_amount ?? null,
-    tax_amount_10:    ex?.tax_amount_10 ?? null,
-    tax_amount_8:     ex?.tax_amount_8 ?? null,
-    invoice_number:   ex?.invoice_number ?? null,
-    payment_method:   ex?.payment_method ?? null,
-    account_title:    ex?.account_title ?? null,
-    tax_category:     ex?.tax_category ?? null,
-    note:             ex?.note ?? null,
+
+  // extracted を form state に変換するヘルパー
+  const extractedToForm = (e: typeof ex): Partial<ExtractedData> => ({
+    transaction_date: e?.transaction_date?.split("T")[0] ?? null,
+    vendor_name:      e?.vendor_name ?? null,
+    vendor_address:   e?.vendor_address ?? null,
+    vendor_phone:     e?.vendor_phone ?? null,
+    vendor_registration_no: e?.vendor_registration_no ?? null,
+    total_amount:     e?.total_amount ?? null,
+    subtotal_amount:  e?.subtotal_amount ?? null,
+    tax_amount_10:    e?.tax_amount_10 ?? null,
+    tax_amount_8:     e?.tax_amount_8 ?? null,
+    invoice_number:   e?.invoice_number ?? null,
+    payment_method:   e?.payment_method ?? null,
+    account_title:    e?.account_title ?? null,
+    tax_category:     e?.tax_category ?? null,
+    note:             e?.note ?? null,
   });
+
+  const [form, setForm] = useState<Partial<ExtractedData>>(() => extractedToForm(ex));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [approving, setApproving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
+
+  // detail.extracted が変わったとき（再OCR処理後など）にフォームを同期
+  useEffect(() => {
+    setForm(extractedToForm(detail.extracted));
+    setSaved(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, detail.extracted]);
 
   const set = (key: keyof ExtractedData, val: string | number | null) => {
     setForm((p) => ({ ...p, [key]: val === "" ? null : val }));
@@ -378,12 +389,21 @@ function ExtractionForm({
 
       {/* 入力フォーム */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <h3 className="font-semibold text-slate-700 text-sm mb-3">
-          抽出データ
-          {ex?.is_manually_corrected && (
-            <span className="ml-2 text-xs bg-amber-100 text-amber-600 px-1.5 rounded-full">手動修正済み</span>
-          )}
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-slate-700 text-sm">
+            抽出データ
+            {ex?.is_manually_corrected && (
+              <span className="ml-2 text-xs bg-amber-100 text-amber-600 px-1.5 rounded-full">手動修正済み</span>
+            )}
+          </h3>
+          <button
+            onClick={() => { setForm(extractedToForm(ex)); setSaved(false); }}
+            className="text-xs text-slate-400 hover:text-sky-600 underline"
+            title="OCR が抽出した元の値に戻します"
+          >
+            OCR 抽出値にリセット
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {/* 取引日 */}
           <div>
@@ -630,6 +650,8 @@ function ReviewPageInner() {
   const [listFilter, setListFilter] = useState("needs_review_only");
   const [statusFilter, setStatusFilter] = useState("");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  // 再OCR処理後にフォームを強制リマウントするためのキー
+  const [reprocessKey, setReprocessKey] = useState(0);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -686,13 +708,15 @@ function ReviewPageInner() {
   const handleReprocess = async () => {
     if (!selectedId) return;
     try {
-      showFeedback("success", "🔄 再OCR処理を開始しました…");
+      showFeedback("success", "🔄 再OCR処理を開始しました（数秒かかります）…");
       await uploadApi.reprocess(selectedId);
-      // 処理完了後にdetailを再取得して抽出データを更新
+      // 処理完了後に detail を再取得して抽出データを更新
       const updated = await documentsApi.get(selectedId);
       setDetail(updated);
+      // フォームを強制リマウントして新しい抽出データを反映
+      setReprocessKey((k) => k + 1);
       await loadDocs();
-      showFeedback("success", "✅ 再OCR処理が完了しました");
+      showFeedback("success", "✅ 再OCR処理が完了しました。抽出データが更新されました");
     } catch (e: unknown) {
       showFeedback("error", e instanceof Error ? e.message : "再OCR処理に失敗しました");
     }
@@ -787,6 +811,7 @@ function ReviewPageInner() {
             </div>
           ) : detail ? (
             <ExtractionForm
+              key={`${detail.id}-${reprocessKey}`}
               detail={detail}
               onSave={handleSave}
               onApprove={handleApprove}
