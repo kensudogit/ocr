@@ -20,16 +20,22 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
+    Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+# Cross-database compatible aliases.
+# In production (PostgreSQL) JSON renders as JSON; Uuid as native UUID.
+# In tests (SQLite) JSON renders as TEXT; Uuid as VARCHAR(32).
+JSONB = JSON  # type alias – JSONB index not needed for PoC
+UUID = Uuid   # type alias
 
 from src.db.database import Base
 

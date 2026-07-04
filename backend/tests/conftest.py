@@ -1,7 +1,7 @@
 """pytest 共通フィクスチャ・設定。
 
 全テストモジュールから自動読み込みされる。
-- テスト用 DB（SQLite インメモリ）
+- テスト用 DB（SQLite インメモリ・StaticPool で単一接続共有）
 - FastAPI テストクライアント
 - サンプル画像・テキスト生成ユーティリティ
 """
@@ -18,8 +18,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
-# テスト環境変数を最初に設定（importより前）
+# ── テスト環境変数（importより前に設定） ────────────────────────────
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
@@ -28,6 +30,55 @@ os.environ.setdefault("UPLOAD_DIR", "/tmp/ocr_test_uploads")
 os.environ.setdefault("EXPORT_DIR", "/tmp/ocr_test_exports")
 os.environ.setdefault("ORIGINALS_DIR", "/tmp/ocr_test_originals")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests-only")
+
+# ── テスト用 DB エンジン（StaticPool で全テストが同一接続を共有） ──────
+# StaticPool を使うことで、create_all で作成したテーブルが
+# 別接続から「見えない」問題を回避する。
+_TEST_ENGINE = create_async_engine(
+    "sqlite+aiosqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+_TestSessionLocal = async_sessionmaker(
+    _TEST_ENGINE,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
+
+
+async def _test_get_db() -> AsyncGenerator[AsyncSession, None]:
+    """テスト用 get_db: テスト用エンジンのセッションを返す。"""
+    async with _TestSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _db_setup():
+    """全テストで自動実行：テーブル作成 + get_db 依存性オーバーライド。
+
+    StaticPool の単一接続上でテーブルを作成するため、
+    全 API ハンドラから同じテーブルが参照できる。
+    """
+    # モデルを Base.metadata に登録してからテーブル作成
+    import src.db.models  # noqa: F401
+    from src.db.database import Base, get_db
+    from src.main import app
+
+    async with _TEST_ENGINE.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    app.dependency_overrides[get_db] = _test_get_db
+    yield
+    app.dependency_overrides.clear()
 
 
 # ── サンプルテキスト ──────────────────────────────────────────────────
