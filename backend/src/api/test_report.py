@@ -147,21 +147,26 @@ async def get_run_status():
 async def _run_pytest(markers: str = "", test_path: str = "tests") -> None:
     """pytest を subprocess で実行する。"""
     report_dir = _BACKEND_DIR / "test-reports"
-    report_dir.mkdir(exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    # tests/ ディレクトリを絶対パスに解決（cwd が変わっても安全）
+    resolved_test_path = str((_BACKEND_DIR / test_path).resolve())
 
     cmd = [
         sys.executable, "-m", "pytest",
-        test_path,
+        resolved_test_path,
         f"--html={report_dir}/report.html",
         "--self-contained-html",
         f"--junitxml={report_dir}/junit.xml",
-        f"--cov=src",
+        "--cov=src",
         f"--cov-report=html:{report_dir}/coverage",
         "--cov-report=term-missing",
         "-v",
         "--tb=short",
         "--color=no",
         "--no-header",
+        # pytest.ini の addopts を継承しないようにオーバーライド
+        "--override-ini=addopts=",
     ]
 
     if markers:
@@ -176,28 +181,47 @@ async def _run_pytest(markers: str = "", test_path: str = "tests") -> None:
             cwd=str(_BACKEND_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**__import__("os").environ,
+                 "PYTHONPATH": str(_BACKEND_DIR),
+                 "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+                 "OPENAI_API_KEY": __import__("os").environ.get("OPENAI_API_KEY", "test-key"),
+                 "GEMINI_API_KEY": __import__("os").environ.get("GEMINI_API_KEY", "test-key"),
+                 "AI_DEPLOYMENT_MODE": "cloud",
+                 "UPLOAD_DIR": "/tmp/ocr_test_uploads",
+                 "EXPORT_DIR": "/tmp/ocr_test_exports",
+                 "ORIGINALS_DIR": "/tmp/ocr_test_originals",
+                 "SECRET_KEY": "test-secret-key-for-tests-only"},
         )
-        stdout, stderr = await proc.communicate()
+        stdout_bytes, stderr_bytes = await proc.communicate()
         exit_code = proc.returncode
 
         elapsed = time.perf_counter() - start
-        logger.info("pytest 完了: exit_code=%d, elapsed=%.1fs", exit_code, elapsed)
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+        logger.info("pytest 完了: exit_code=%d, elapsed=%.1fs\n%s",
+                    exit_code, elapsed, stdout_text[-3000:])
+        if stderr_text.strip():
+            logger.warning("pytest stderr: %s", stderr_text[-2000:])
 
-        _test_run_state["status"] = "completed" if exit_code == 0 else "failed"
+        # exit_code 1 = テスト失敗あり（正常終了）、0 = 全成功
+        # exit_code 2+ = 設定エラーなど（異常）
+        _test_run_state["status"] = "completed" if exit_code in (0, 1) else "failed"
         _test_run_state["exit_code"] = exit_code
         _test_run_state["completed_at"] = datetime.now().isoformat()
+        _test_run_state["stdout"] = stdout_text[-5000:]
 
         # JUnit XML を解析してサマリーを保存
         if _JUNIT_XML.exists():
             try:
                 _test_run_state["summary"] = _parse_junit_xml(_JUNIT_XML)
-            except Exception:
-                pass
+            except Exception as parse_exc:
+                logger.warning("JUnit XML 解析エラー: %s", parse_exc)
 
     except Exception as exc:
         logger.error("pytest 実行エラー: %s", exc)
         _test_run_state["status"] = "failed"
         _test_run_state["completed_at"] = datetime.now().isoformat()
+        _test_run_state["stdout"] = str(exc)
 
 
 def _parse_junit_xml(xml_path: Path) -> dict:

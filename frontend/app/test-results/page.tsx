@@ -402,7 +402,7 @@ export default function TestResultsPage() {
         </div>
 
         {/* ── テスト一覧 ───────────────────────────────────────────── */}
-        <TestModuleList />
+        <TestModuleList failedCases={summary?.failed_cases} />
       </div>
     </div>
   );
@@ -452,102 +452,34 @@ function Grid({
 
 // ── テストモジュール一覧 ─────────────────────────────────────────────
 
-function TestModuleList() {
-  const modules = [
-    {
-      file: "tests/core/test_invoice_validator.py",
-      name: "インボイス番号検証",
-      markers: ["unit", "invoice"],
-      count: 19,
-      desc: "T+13桁 形式検証・チェックデジット・OCR 誤認識吸収",
-    },
-    {
-      file: "tests/core/test_pii_masker.py",
-      name: "PII マスク",
-      markers: ["unit", "pii"],
-      count: 17,
-      desc: "マイナンバー・口座番号・カード番号 マスク/復元・Luhn 検証",
-    },
-    {
-      file: "tests/core/test_confidence_scorer.py",
-      name: "信頼度スコアリング",
-      markers: ["unit"],
-      count: 14,
-      desc: "3段階分類・検算ロジック・スコア計算・境界値",
-    },
-    {
-      file: "tests/core/test_rule_engine.py",
-      name: "ルールエンジン",
-      markers: ["unit"],
-      count: 17,
-      desc: "キーワードマッピング・過去仕訳学習・顧問先別分離",
-    },
-    {
-      file: "tests/core/test_classifier.py",
-      name: "書類分類",
-      markers: ["unit"],
-      count: 14,
-      desc: "レシート・手書き・請求書・カード明細 の分類",
-    },
-    {
-      file: "tests/core/test_journal_model.py",
-      name: "仕訳データモデル（疎結合）",
-      markers: ["unit"],
-      count: 20,
-      desc: "freee/MF/弥生 アダプタ・顧問先マスタ・名寄せ",
-    },
-    {
-      file: "tests/core/test_electronic_bookkeeping.py",
-      name: "電子帳簿保存法",
-      markers: ["unit", "electronic_bookkeeping"],
-      count: 14,
-      desc: "解像度チェック・SHA-256 ハッシュ・原本保存・改ざん検知",
-    },
-    {
-      file: "tests/core/test_extractor.py",
-      name: "データ抽出",
-      markers: ["unit"],
-      count: 22,
-      desc: "日付・金額・取引先・インボイス番号・支払方法 抽出",
-    },
-    {
-      file: "tests/core/test_audit_log.py",
-      name: "監査ログ",
-      markers: ["unit", "security"],
-      count: 11,
-      desc: "操作ログ・変更差分・セキュリティヘッダ",
-    },
-    {
-      file: "tests/api/test_health.py",
-      name: "ヘルスチェック API",
-      markers: ["integration"],
-      count: 7,
-      desc: "FastAPI 起動・/health・/docs エンドポイント",
-    },
-    {
-      file: "tests/api/test_upload_api.py",
-      name: "アップロード API",
-      markers: ["integration"],
-      count: 9,
-      desc: "ファイルアップロード・拡張子バリデーション・バッチ処理",
-    },
-    {
-      file: "tests/api/test_documents_api.py",
-      name: "書類管理 API",
-      markers: ["integration"],
-      count: 10,
-      desc: "一覧・詳細・承認・差し戻し・統計",
-    },
-    {
-      file: "tests/api/test_clients_api.py",
-      name: "顧問先管理 API",
-      markers: ["integration"],
-      count: 8,
-      desc: "顧問先 CRUD・統計・仕訳履歴",
-    },
-  ];
+const MODULE_DEFS = [
+  { file: "tests/core/test_invoice_validator.py", name: "インボイス番号検証",   markers: ["unit","invoice"],                count: 19, desc: "T+13桁 形式検証・チェックデジット・OCR 誤認識吸収" },
+  { file: "tests/core/test_pii_masker.py",         name: "PII マスク",           markers: ["unit","pii"],                    count: 17, desc: "マイナンバー・口座番号・カード番号 マスク/復元・Luhn 検証" },
+  { file: "tests/core/test_confidence_scorer.py",  name: "信頼度スコアリング",   markers: ["unit"],                          count: 14, desc: "3段階分類・検算ロジック・スコア計算・境界値" },
+  { file: "tests/core/test_rule_engine.py",        name: "ルールエンジン",       markers: ["unit"],                          count: 17, desc: "キーワードマッピング・過去仕訳学習・顧問先別分離" },
+  { file: "tests/core/test_classifier.py",         name: "書類分類",             markers: ["unit"],                          count: 14, desc: "レシート・手書き・請求書・カード明細 の分類" },
+  { file: "tests/core/test_journal_model.py",      name: "仕訳データモデル",     markers: ["unit"],                          count: 20, desc: "freee/MF/弥生 アダプタ・顧問先マスタ・名寄せ" },
+  { file: "tests/core/test_electronic_bookkeeping.py", name: "電子帳簿保存法",  markers: ["unit","electronic_bookkeeping"], count: 14, desc: "解像度チェック・SHA-256 ハッシュ・原本保存・改ざん検知" },
+  { file: "tests/core/test_extractor.py",          name: "データ抽出",           markers: ["unit"],                          count: 22, desc: "日付・金額・取引先・インボイス番号・支払方法 抽出" },
+  { file: "tests/core/test_audit_log.py",          name: "監査ログ",             markers: ["unit","security"],               count: 11, desc: "操作ログ・変更差分・セキュリティヘッダ" },
+  { file: "tests/api/test_health.py",              name: "ヘルスチェック API",   markers: ["integration"],                   count:  7, desc: "FastAPI 起動・/health・/docs エンドポイント" },
+  { file: "tests/api/test_upload_api.py",          name: "アップロード API",     markers: ["integration"],                   count:  9, desc: "ファイルアップロード・拡張子バリデーション・バッチ処理" },
+  { file: "tests/api/test_documents_api.py",       name: "書類管理 API",         markers: ["integration"],                   count: 10, desc: "一覧・詳細・承認・差し戻し・統計" },
+  { file: "tests/api/test_clients_api.py",         name: "顧問先管理 API",       markers: ["integration"],                   count:  8, desc: "顧問先 CRUD・統計・仕訳履歴" },
+];
 
-  const totalTests = modules.reduce((s, m) => s + m.count, 0);
+function TestModuleList({ failedCases }: { failedCases?: TestSummary["failed_cases"] }) {
+  // テスト実行後は失敗クラス名からモジュール別状態を算出
+  const failedClassnames = new Set(failedCases?.map((c) => c.classname) ?? []);
+
+  const getModuleStatus = (file: string) => {
+    if (!failedCases) return "unknown";          // 未実行
+    const key = file.replace("tests/", "").replace(".py", "").replace(/\//g, ".");
+    const hasFail = [...failedClassnames].some((cn) => cn.includes(key.split(".").at(-1) ?? ""));
+    return hasFail ? "fail" : "pass";
+  };
+
+  const totalTests = MODULE_DEFS.reduce((s, m) => s + m.count, 0);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -556,32 +488,33 @@ function TestModuleList() {
         <span className="text-sm text-gray-500">合計 {totalTests} ケース</span>
       </div>
       <div className="divide-y divide-gray-100">
-        {modules.map((m) => (
-          <div key={m.file} className="px-5 py-3 hover:bg-gray-50 transition-colors">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-gray-800">{m.name}</span>
-                  {m.markers.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-500 rounded font-mono"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+        {MODULE_DEFS.map((m) => {
+          const status = getModuleStatus(m.file);
+          return (
+            <div key={m.file} className="px-5 py-3 hover:bg-gray-50 transition-colors">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {status === "pass" && <span className="text-green-500 text-sm">✓</span>}
+                    {status === "fail" && <span className="text-red-500 text-sm">✗</span>}
+                    {status === "unknown" && <span className="text-gray-300 text-sm">○</span>}
+                    <span className="text-sm font-medium text-gray-800">{m.name}</span>
+                    {m.markers.map((tag) => (
+                      <span key={tag} className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-500 rounded font-mono">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">{m.file}</p>
+                  <p className="text-xs text-gray-500 mt-1">{m.desc}</p>
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">
-                  {m.file}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">{m.desc}</p>
+                <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+                  {m.count} ケース
+                </span>
               </div>
-              <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">
-                {m.count} ケース
-              </span>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
