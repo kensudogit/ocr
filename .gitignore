@@ -43,3 +43,6 @@ desktop.ini
 
 # Docker
 *.env.docker
+
+# Office 一時ファイル（Excel 等が開いているときに作られるロックファイル）
+~$*
