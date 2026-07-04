@@ -8,7 +8,7 @@
  * pytest-html レポートと coverage レポートを iframe で埋め込む。
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 // ── 型定義 ──────────────────────────────────────────────────────────────
 
@@ -42,7 +42,15 @@ interface TestReportData {
   report_html_url: string;
   coverage_url: string;
   last_updated: number | null;
+  html_report_exists?: boolean;
   message?: string;
+}
+
+/** API から返った summary がエラー dict でないか検証する */
+function isValidSummary(s: unknown): s is TestSummary {
+  if (!s || typeof s !== "object") return false;
+  const o = s as Record<string, unknown>;
+  return typeof o.total === "number" && typeof o.pass_rate === "number";
 }
 
 // ── ユーティリティ ────────────────────────────────────────────────────
@@ -174,6 +182,10 @@ export default function TestResultsPage() {
   const [selectedMarker, setSelectedMarker] = useState("");
   const [activeTab, setActiveTab] = useState<"summary" | "report" | "coverage">("summary");
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [reportSrcdoc, setReportSrcdoc] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [coverageSrcdoc, setCoverageSrcdoc] = useState<string | null>(null);
+  const [coverageLoading, setCoverageLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -200,6 +212,36 @@ export default function TestResultsPage() {
     return () => clearInterval(interval);
   }, [running, autoRefresh, loadData]);
 
+  // HTML レポートをタブ選択時に fetch して srcdoc に設定する
+  useEffect(() => {
+    if (activeTab === "report" && reportSrcdoc === null && !reportLoading) {
+      setReportLoading(true);
+      fetch(`${API_BASE}/test-report/html`)
+        .then((r) => r.text())
+        .then((html) => setReportSrcdoc(html))
+        .catch(() => setReportSrcdoc("<p style='padding:20px'>レポートを読み込めませんでした。まずテストを実行してください。</p>"))
+        .finally(() => setReportLoading(false));
+    }
+    if (activeTab === "coverage" && coverageSrcdoc === null && !coverageLoading) {
+      setCoverageLoading(true);
+      fetch(`${API_BASE}/test-report/coverage`)
+        .then((r) => r.text())
+        .then((html) => setCoverageSrcdoc(html))
+        .catch(() => setCoverageSrcdoc("<p style='padding:20px'>カバレッジレポートを読み込めませんでした。</p>"))
+        .finally(() => setCoverageLoading(false));
+    }
+  }, [activeTab, reportSrcdoc, reportLoading, coverageSrcdoc, coverageLoading]);
+
+  // テスト完了後に srcdoc をリセットして最新レポートを再取得させる
+  useEffect(() => {
+    const prevStatus = running;
+    if (!prevStatus) return;
+    if (!running) {
+      setReportSrcdoc(null);
+      setCoverageSrcdoc(null);
+    }
+  }, [running]);
+
   const handleRunTests = async () => {
     setRunning(true);
     setFeedback(null);
@@ -207,6 +249,9 @@ export default function TestResultsPage() {
       const result = await runTests(selectedMarker);
       setFeedback(result.message);
       setAutoRefresh(true);
+      // 新規実行なのでキャッシュ済みのレポートをクリア
+      setReportSrcdoc(null);
+      setCoverageSrcdoc(null);
       setTimeout(loadData, 1000);
     } catch (err) {
       setFeedback(`エラー: ${err}`);
@@ -222,7 +267,9 @@ export default function TestResultsPage() {
     );
   }
 
-  const summary = data?.summary || data?.run_state?.summary;
+  // エラー dict（{error:...} や {parse_error:...}）を除外してから使用する
+  const rawSummary = data?.summary ?? data?.run_state?.summary;
+  const summary = isValidSummary(rawSummary) ? rawSummary : null;
   const runState = data?.run_state;
 
   return (
@@ -360,7 +407,7 @@ export default function TestResultsPage() {
             {/* HTML レポートタブ */}
             {activeTab === "report" && (
               <div className="space-y-3">
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <a
                     href={`${API_BASE}/test-report/html`}
                     target="_blank"
@@ -369,19 +416,33 @@ export default function TestResultsPage() {
                   >
                     別タブで開く
                   </a>
+                  {reportLoading && (
+                    <span className="text-xs text-gray-400">読み込み中...</span>
+                  )}
                 </div>
-                <iframe
-                  src={`${API_BASE}/test-report/html`}
-                  className="w-full h-[600px] border border-gray-200 rounded"
-                  title="pytest HTML レポート"
-                />
+                {reportSrcdoc ? (
+                  <iframe
+                    srcDoc={reportSrcdoc}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="w-full h-[600px] border border-gray-200 rounded bg-white"
+                    title="pytest HTML レポート"
+                  />
+                ) : reportLoading ? (
+                  <div className="w-full h-[200px] flex items-center justify-center text-gray-400 border border-gray-200 rounded">
+                    レポートを読み込んでいます...
+                  </div>
+                ) : (
+                  <div className="w-full h-[200px] flex items-center justify-center text-gray-400 border border-gray-200 rounded text-sm">
+                    テストを実行するとここにHTMLレポートが表示されます
+                  </div>
+                )}
               </div>
             )}
 
             {/* カバレッジタブ */}
             {activeTab === "coverage" && (
               <div className="space-y-3">
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <a
                     href={`${API_BASE}/test-report/coverage`}
                     target="_blank"
@@ -390,12 +451,26 @@ export default function TestResultsPage() {
                   >
                     別タブで開く
                   </a>
+                  {coverageLoading && (
+                    <span className="text-xs text-gray-400">読み込み中...</span>
+                  )}
                 </div>
-                <iframe
-                  src={`${API_BASE}/test-report/coverage`}
-                  className="w-full h-[600px] border border-gray-200 rounded"
-                  title="カバレッジレポート"
-                />
+                {coverageSrcdoc ? (
+                  <iframe
+                    srcDoc={coverageSrcdoc}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="w-full h-[600px] border border-gray-200 rounded bg-white"
+                    title="カバレッジレポート"
+                  />
+                ) : coverageLoading ? (
+                  <div className="w-full h-[200px] flex items-center justify-center text-gray-400 border border-gray-200 rounded">
+                    カバレッジレポートを読み込んでいます...
+                  </div>
+                ) : (
+                  <div className="w-full h-[200px] flex items-center justify-center text-gray-400 border border-gray-200 rounded text-sm">
+                    テストを実行するとここにカバレッジレポートが表示されます
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -417,22 +492,21 @@ function Grid({
   summary: TestSummary;
   runState: TestRunState | undefined;
 }) {
-  const statusColor =
-    summary.failed + summary.errors > 0
-      ? "text-red-600"
-      : "text-green-600";
+  const failCount = (summary.failed ?? 0) + (summary.errors ?? 0);
+  const passRate  = summary.pass_rate ?? 0;
+  const statusColor = failCount > 0 ? "text-red-600" : "text-green-600";
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard value={summary.total} label="総テスト数" color="text-gray-800" />
-        <StatCard value={summary.passed} label="合格" color="text-green-600" />
-        <StatCard value={summary.failed + summary.errors} label="失敗" color="text-red-600" />
-        <StatCard value={summary.skipped} label="スキップ" color="text-yellow-600" />
-        <StatCard value={`${summary.pass_rate}%`} label="合格率" color={statusColor} />
+        <StatCard value={summary.total   ?? 0} label="総テスト数" color="text-gray-800" />
+        <StatCard value={summary.passed  ?? 0} label="合格"       color="text-green-600" />
+        <StatCard value={failCount}             label="失敗"       color="text-red-600" />
+        <StatCard value={summary.skipped ?? 0} label="スキップ"   color="text-yellow-600" />
+        <StatCard value={`${passRate}%`}        label="合格率"     color={statusColor} />
       </div>
       <div className="flex flex-wrap gap-4 text-sm text-gray-500">
-        <span>実行時間: {summary.time_seconds}秒</span>
+        <span>実行時間: {summary.time_seconds ?? 0}秒</span>
         {runState?.completed_at && (
           <span>
             最終実行: {new Date(runState.completed_at).toLocaleString("ja-JP")}

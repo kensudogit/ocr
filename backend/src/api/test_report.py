@@ -63,7 +63,11 @@ async def get_test_summary():
         summary = _parse_junit_xml(_JUNIT_XML)
     except Exception as exc:
         logger.warning("JUnit XML 解析エラー: %s", exc)
-        summary = {"parse_error": str(exc)}
+        summary = _empty_summary()
+
+    # run_state.summary も最新に同期
+    if _test_run_state.get("summary") is None:
+        _test_run_state["summary"] = summary
 
     return {
         "status": "available",
@@ -73,6 +77,7 @@ async def get_test_summary():
         "coverage_url": "/test-report/coverage",
         "junit_url": "/test-report/junit.xml",
         "last_updated": _REPORT_HTML.stat().st_mtime if _REPORT_HTML.exists() else None,
+        "html_report_exists": _REPORT_HTML.exists(),
     }
 
 
@@ -224,49 +229,97 @@ async def _run_pytest(markers: str = "", test_path: str = "tests") -> None:
         _test_run_state["stdout"] = str(exc)
 
 
+def _empty_summary() -> dict:
+    """フィールドが揃った空のサマリーを返す（パース失敗時のフォールバック）。"""
+    return {
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "pass_rate": 0.0,
+        "time_seconds": 0.0,
+        "failed_cases": [],
+    }
+
+
 def _parse_junit_xml(xml_path: Path) -> dict:
-    """JUnit XML からテスト結果サマリーを抽出する。"""
+    """JUnit XML からテスト結果サマリーを抽出する。
+
+    pytest が生成する形式を 2 パターン処理する:
+      - <testsuites><testsuite ...>...</testsuite></testsuites>  (xunit2 / default)
+      - <testsuite ...>...</testsuite>                            (legacy)
+
+    複数の <testsuite> 要素がある場合はすべてを集計する。
+    解析に失敗した場合でも例外を送出せず、空のサマリーを返す。
+    """
     import xml.etree.ElementTree as ET
 
-    tree = ET.parse(xml_path)
+    try:
+        tree = ET.parse(xml_path)
+    except ET.ParseError as exc:
+        logger.warning("JUnit XML ParseError: %s", exc)
+        return _empty_summary()
+
     root = tree.getroot()
 
-    # <testsuite> 要素を探す
-    suite = root if root.tag == "testsuite" else root.find("testsuite")
-    if suite is None:
+    # すべての <testsuite> 要素を収集して集計する
+    if root.tag == "testsuite":
+        suites = [root]
+    else:
+        # <testsuites> の直接の子 → さらにネストがある場合も含める
         suites = root.findall(".//testsuite")
-        if not suites:
-            return {"error": "testsuite 要素が見つかりません"}
-        suite = suites[0]
 
-    total = int(suite.get("tests", 0))
-    errors = int(suite.get("errors", 0))
-    failures = int(suite.get("failures", 0))
-    skipped = int(suite.get("skipped", 0))
-    passed = total - errors - failures - skipped
-    time_sec = float(suite.get("time", 0))
+    if not suites:
+        logger.warning("testsuite 要素が見つかりません: %s", xml_path)
+        return _empty_summary()
 
-    # 失敗テストの詳細
-    failed_cases = []
+    total = errors = failures = skipped = 0
+    time_sec = 0.0
+
+    for s in suites:
+        t = int(s.get("tests", 0) or 0)
+        # tests=0 のラッパー testsuite は集計から除外（子 testsuite に実データがある）
+        if t == 0 and len(suites) > 1:
+            continue
+        total    += t
+        errors   += int(s.get("errors",   0) or 0)
+        failures += int(s.get("failures", 0) or 0)
+        skipped  += int(s.get("skipped",  0) or 0)
+        time_sec += float(s.get("time", 0) or 0)
+
+    # どの suite にも tests > 0 がなかった場合は単純に全要素を合算
+    if total == 0 and suites:
+        for s in suites:
+            total    += int(s.get("tests",    0) or 0)
+            errors   += int(s.get("errors",   0) or 0)
+            failures += int(s.get("failures", 0) or 0)
+            skipped  += int(s.get("skipped",  0) or 0)
+
+    passed = max(0, total - errors - failures - skipped)
+
+    # 失敗テストの詳細（最大 20 件）
+    failed_cases: list[dict] = []
     for tc in root.findall(".//testcase"):
         failure = tc.find("failure")
         error_elem = tc.find("error")
         if failure is not None or error_elem is not None:
+            msg_elem = failure if failure is not None else error_elem
             failed_cases.append({
-                "name": tc.get("name", ""),
+                "name":      tc.get("name", ""),
                 "classname": tc.get("classname", ""),
-                "message": (failure or error_elem).get("message", "")[:200],
+                "message":   (msg_elem.get("message", "") or "")[:200],
             })
 
     return {
-        "total": total,
-        "passed": passed,
-        "failed": failures,
-        "errors": errors,
-        "skipped": skipped,
-        "pass_rate": round(passed / total * 100, 1) if total > 0 else 0,
+        "total":        total,
+        "passed":       passed,
+        "failed":       failures,
+        "errors":       errors,
+        "skipped":      skipped,
+        "pass_rate":    round(passed / total * 100, 1) if total > 0 else 0.0,
         "time_seconds": round(time_sec, 2),
-        "failed_cases": failed_cases[:10],  # 最大10件
+        "failed_cases": failed_cases[:20],
     }
 
 
