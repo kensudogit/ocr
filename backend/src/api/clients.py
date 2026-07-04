@@ -66,7 +66,11 @@ async def update_client(client_id: uuid.UUID, body: ClientUpdate, db: AsyncSessi
 
 @router.get("/{client_id}/stats", summary="顧問先の処理統計")
 async def get_client_stats(client_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """顧問先ごとの処理統計を返す。"""
+    """顧問先ごとの処理統計を返す。存在しない顧問先は 404 を返す。"""
+    client = (await db.execute(select(Client).where(Client.id == client_id))).scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="顧問先が見つかりません")
+
     from src.db.models import DocStatus
     total = (await db.execute(
         select(func.count(Document.id)).where(Document.client_id == client_id)
