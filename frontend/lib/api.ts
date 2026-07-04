@@ -54,6 +54,7 @@ export interface Document {
 export interface DocumentDetail extends Document {
   stored_filename: string;
   file_path: string;
+  mime_type: string;
   doc_type_confidence: number | null;
   ocr_engine_used: string | null;
   ocr_raw_text: string | null;

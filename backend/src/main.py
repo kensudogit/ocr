@@ -165,17 +165,41 @@ async def startup() -> None:
 
 
 async def _migrate_add_file_content() -> None:
-    """既存の documents テーブルに file_content カラムを追加する（冪等）。"""
+    """既存の documents テーブルに file_content (TEXT/base64) カラムを追加する（冪等）。
+
+    前回デプロイで BYTEA として作成済みの場合は削除して TEXT で再作成する。
+    データ損失は許容（BYTEA 版は表示できなかったため）。
+    """
     from src.db.database import engine
     from sqlalchemy import text
     try:
         async with engine.begin() as conn:
-            # PostgreSQL と SQLite 両方に対応（IF NOT EXISTS は両方サポート）
-            await conn.execute(text(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_content BYTEA"
-            ))
+            # 1. BYTEA で作成されていれば削除（前回デプロイの残骸）
+            #    PostgreSQL 専用構文のため SQLite では例外を無視
+            try:
+                await conn.execute(text("""
+                    DO $$BEGIN
+                      IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_name='documents'
+                           AND column_name='file_content'
+                           AND udt_name='bytea'
+                      ) THEN
+                        ALTER TABLE documents DROP COLUMN file_content;
+                      END IF;
+                    END$$
+                """))
+            except Exception:
+                pass  # SQLite など非対応環境ではスキップ
+
+            # 2. TEXT カラムとして追加（既に TEXT で存在する場合は重複エラーを無視）
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE documents ADD COLUMN file_content TEXT"
+                ))
+            except Exception:
+                pass  # 既存の場合は無視
     except Exception as exc:
-        # SQLite は IF NOT EXISTS 未サポートのため "duplicate column" エラーを無視
         logger.debug("file_content マイグレーション: %s", exc)
 
 

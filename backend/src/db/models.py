@@ -23,7 +23,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
-    LargeBinary,
     Numeric,
     String,
     Text,
@@ -133,8 +132,8 @@ class Document(Base):
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     mime_type: Mapped[str] = mapped_column(String(100))
     page_count: Mapped[int] = mapped_column(Integer, default=1)
-    # ファイルバイナリ: Railway のエフェメラルFSで失われないよう DB に保存
-    file_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # ファイルバイナリ: Railway の ephemeral FS で失われないよう base64 テキストで DB に保存
+    file_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── 書類分類 ──────────────────────────────────────────────
     doc_type: Mapped[str] = mapped_column(

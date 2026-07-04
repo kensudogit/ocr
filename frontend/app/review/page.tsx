@@ -155,41 +155,82 @@ function DocumentList({
 // ── 原本画像パネル ──────────────────────────────────────────────────
 function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
   const [zoom, setZoom] = useState(1.0);
-  // /documents/{id}/file は DB バイナリから配信（Railway の ephemeral FS 対策）
+  const [imgError, setImgError] = useState(false);
+  // /documents/{id}/file は DB base64 から配信（Railway の ephemeral FS 対策）
   const imgSrc = `${API_BASE}/documents/${doc.id}/file`;
+  const isPdf = doc.mime_type === "application/pdf" ||
+    doc.original_filename.toLowerCase().endsWith(".pdf");
 
   return (
     <div className="bg-slate-900 rounded-xl overflow-hidden flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 bg-slate-800">
         <span className="text-xs text-slate-300 font-medium">原本画像</span>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}
-            className="text-slate-400 hover:text-white text-lg leading-none"
+          {!isPdf && (
+            <>
+              <button
+                onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}
+                className="text-slate-400 hover:text-white text-lg leading-none"
+              >
+                −
+              </button>
+              <span className="text-xs text-slate-300 w-10 text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={() => setZoom((z) => Math.min(3.0, z + 0.25))}
+                className="text-slate-400 hover:text-white text-lg leading-none"
+              >
+                ＋
+              </button>
+            </>
+          )}
+          <a
+            href={imgSrc}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-sky-400 hover:text-sky-300 ml-2"
           >
-            −
-          </button>
-          <span className="text-xs text-slate-300 w-10 text-center">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={() => setZoom((z) => Math.min(3.0, z + 0.25))}
-            className="text-slate-400 hover:text-white text-lg leading-none"
-          >
-            ＋
-          </button>
+            別タブで開く
+          </a>
         </div>
       </div>
       <div className="overflow-auto flex-1 p-3">
-        <img
-          src={imgSrc}
-          alt={doc.original_filename}
-          style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
-          className="max-w-none transition-transform"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23374151' width='200' height='200'/%3E%3Ctext fill='%239CA3AF' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E画像なし%3C/text%3E%3C/svg%3E";
-          }}
-        />
+        {isPdf ? (
+          <iframe
+            src={imgSrc}
+            title={doc.original_filename}
+            className="w-full h-full min-h-96 rounded"
+            style={{ minHeight: "500px" }}
+          />
+        ) : imgError ? (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2 py-8">
+            <svg className="w-12 h-12 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <p className="text-sm font-medium">画像を読み込めません</p>
+            <p className="text-xs text-slate-500 text-center">
+              再アップロードすると表示されます
+            </p>
+            <a
+              href={imgSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-sky-400 underline mt-1"
+            >
+              直接URLを確認
+            </a>
+          </div>
+        ) : (
+          <img
+            src={imgSrc}
+            alt={doc.original_filename}
+            style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
+            className="max-w-none transition-transform"
+            onError={() => setImgError(true)}
+          />
+        )}
       </div>
     </div>
   );
