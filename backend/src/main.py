@@ -144,9 +144,9 @@ for _router in [upload_router, doc_router, export_router, client_router, test_re
         app.include_router(_router)
 
 # ── 静的ファイル（アップロード済み画像プレビュー用） ─────────────────
-import os as _os
-if _os.path.isdir(settings.upload_dir):
-    app.mount("/files", StaticFiles(directory=settings.upload_dir), name="uploads")
+from pathlib import Path as _Path
+_Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+app.mount("/files", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 
 # ── ライフサイクル ────────────────────────────────────────────────────

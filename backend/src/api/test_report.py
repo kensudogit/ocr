@@ -104,6 +104,37 @@ async def get_coverage_report():
     return FileResponse(_COVERAGE_HTML, media_type="text/html")
 
 
+@router.get("/coverage/{filename:path}", summary="カバレッジレポートのアセット配信")
+async def get_coverage_asset(filename: str):
+    """coverage.py が生成する CSS・JS・画像などのアセットを配信する。
+
+    srcdoc iframe で coverage index.html を表示する際、
+    相対パスで参照されるアセットをこのエンドポイントが補完する。
+    """
+    asset_path = _COVERAGE_DIR / filename
+    # パストラバーサル防止: coverage ディレクトリ外へのアクセスを拒否
+    try:
+        asset_path.resolve().relative_to(_COVERAGE_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="不正なパス")
+
+    if not asset_path.exists() or not asset_path.is_file():
+        raise HTTPException(status_code=404, detail=f"アセットが見つかりません: {filename}")
+
+    # Content-Type を拡張子から推定
+    suffix = asset_path.suffix.lower()
+    media_type = {
+        ".js":  "application/javascript",
+        ".css": "text/css",
+        ".png": "image/png",
+        ".ico": "image/x-icon",
+        ".html": "text/html",
+        ".json": "application/json",
+    }.get(suffix, "application/octet-stream")
+
+    return FileResponse(asset_path, media_type=media_type)
+
+
 @router.get("/junit.xml", summary="JUnit XML レポートを取得")
 async def get_junit_xml():
     """JUnit XML 形式のレポートを返す（CI 連携用）。"""

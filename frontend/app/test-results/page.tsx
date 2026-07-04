@@ -186,6 +186,7 @@ export default function TestResultsPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [coverageSrcdoc, setCoverageSrcdoc] = useState<string | null>(null);
   const [coverageLoading, setCoverageLoading] = useState(false);
+  const prevRunningRef = useRef(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -212,13 +213,30 @@ export default function TestResultsPage() {
     return () => clearInterval(interval);
   }, [running, autoRefresh, loadData]);
 
+  // srcdoc 用の HTML に <base> タグを注入して相対パスを解決するヘルパー
+  const injectBase = (html: string, baseHref: string): string => {
+    const baseTag = `<base href="${baseHref}">`;
+    // 既存の <base> タグがあれば置換、なければ <head> の直後に挿入
+    if (/<base\b/i.test(html)) {
+      return html.replace(/<base\b[^>]*>/i, baseTag);
+    }
+    if (/<head\b[^>]*>/i.test(html)) {
+      return html.replace(/(<head\b[^>]*>)/i, `$1${baseTag}`);
+    }
+    return baseTag + html;
+  };
+
   // HTML レポートをタブ選択時に fetch して srcdoc に設定する
   useEffect(() => {
     if (activeTab === "report" && reportSrcdoc === null && !reportLoading) {
       setReportLoading(true);
       fetch(`${API_BASE}/test-report/html`)
         .then((r) => r.text())
-        .then((html) => setReportSrcdoc(html))
+        .then((html) => {
+          // pytest-html は基本的に自己完結しているが念のため base を設定
+          const origin = typeof window !== "undefined" ? window.location.origin : "";
+          setReportSrcdoc(injectBase(html, `${origin}${API_BASE}/test-report/html`));
+        })
         .catch(() => setReportSrcdoc("<p style='padding:20px'>レポートを読み込めませんでした。まずテストを実行してください。</p>"))
         .finally(() => setReportLoading(false));
     }
@@ -226,20 +244,25 @@ export default function TestResultsPage() {
       setCoverageLoading(true);
       fetch(`${API_BASE}/test-report/coverage`)
         .then((r) => r.text())
-        .then((html) => setCoverageSrcdoc(html))
+        .then((html) => {
+          // coverage の index.html は CSS/JS/画像を相対パスで参照しているため
+          // <base> タグで /api/test-report/coverage/ をベースに設定する
+          const origin = typeof window !== "undefined" ? window.location.origin : "";
+          setCoverageSrcdoc(injectBase(html, `${origin}${API_BASE}/test-report/coverage/`));
+        })
         .catch(() => setCoverageSrcdoc("<p style='padding:20px'>カバレッジレポートを読み込めませんでした。</p>"))
         .finally(() => setCoverageLoading(false));
     }
   }, [activeTab, reportSrcdoc, reportLoading, coverageSrcdoc, coverageLoading]);
 
   // テスト完了後に srcdoc をリセットして最新レポートを再取得させる
+  // useRef で前回の running 値を追跡し、true→false の遷移を正確に検出する
   useEffect(() => {
-    const prevStatus = running;
-    if (!prevStatus) return;
-    if (!running) {
+    if (prevRunningRef.current && !running) {
       setReportSrcdoc(null);
       setCoverageSrcdoc(null);
     }
+    prevRunningRef.current = running;
   }, [running]);
 
   const handleRunTests = async () => {
