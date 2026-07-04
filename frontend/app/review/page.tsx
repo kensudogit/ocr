@@ -155,7 +155,8 @@ function DocumentList({
 // ── 原本画像パネル ──────────────────────────────────────────────────
 function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
   const [zoom, setZoom] = useState(1.0);
-  const imgSrc = `${API_BASE}/files/${doc.stored_filename}`;
+  // /documents/{id}/file は DB バイナリから配信（Railway の ephemeral FS 対策）
+  const imgSrc = `${API_BASE}/documents/${doc.id}/file`;
 
   return (
     <div className="bg-slate-900 rounded-xl overflow-hidden flex flex-col h-full">

@@ -156,10 +156,27 @@ async def startup() -> None:
     try:
         logger.info("データベーステーブルを初期化中...")
         await create_tables()
+        # file_content カラムが存在しない旧テーブルへのマイグレーション
+        await _migrate_add_file_content()
         logger.info("DB初期化完了")
     except Exception as exc:
         logger.warning("DB初期化スキップ（接続不可）: %s", exc)
     logger.info("起動完了 — %s v%s", settings.app_name, settings.app_version)
+
+
+async def _migrate_add_file_content() -> None:
+    """既存の documents テーブルに file_content カラムを追加する（冪等）。"""
+    from src.db.database import engine
+    from sqlalchemy import text
+    try:
+        async with engine.begin() as conn:
+            # PostgreSQL と SQLite 両方に対応（IF NOT EXISTS は両方サポート）
+            await conn.execute(text(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_content BYTEA"
+            ))
+    except Exception as exc:
+        # SQLite は IF NOT EXISTS 未サポートのため "duplicate column" エラーを無視
+        logger.debug("file_content マイグレーション: %s", exc)
 
 
 # ── ルート ───────────────────────────────────────────────────────────

@@ -4,7 +4,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -315,6 +318,38 @@ async def reject_document(
         doc.processing_error = f"差し戻し: {reason}"
     await db.flush()
     return {"message": "書類を差し戻しました", "document_id": doc_id}
+
+
+@router.get("/{doc_id}/file", summary="書類の原本画像を配信する")
+async def get_document_file(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """書類の原本ファイルバイナリを返す。
+
+    優先順位:
+      1. DB に保存された file_content バイナリ（Railway 対応）
+      2. ローカルファイルシステムの file_path
+    どちらも存在しない場合は 404。
+    """
+    doc = (await db.execute(
+        select(Document).where(Document.id == doc_id)
+    )).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="書類が見つかりません")
+
+    mime = doc.mime_type or "application/octet-stream"
+
+    # 1. DB バイナリ優先
+    if doc.file_content:
+        return Response(content=doc.file_content, media_type=mime)
+
+    # 2. ローカルファイルシステムにフォールバック
+    file_path = Path(doc.file_path) if doc.file_path else None
+    if file_path and file_path.exists():
+        return Response(content=file_path.read_bytes(), media_type=mime)
+
+    raise HTTPException(
+        status_code=404,
+        detail="ファイルが見つかりません（コンテナ再起動後にアップロードし直してください）",
+    )
 
 
 @router.delete("/{doc_id}", summary="書類を削除する")
