@@ -37,7 +37,7 @@ _KEYWORDS: dict[str, list[str]] = {
         "お客様番号", "登録番号",        # 適格請求書登録番号はレシートに表示
     ],
     "handwritten": [
-        "領収書", "上様", "但し", "金額", "收入印紙",
+        "領収書", "上様", "但し", "收入印紙",
         "収入印紙", "印紙", "担当者",
     ],
     "invoice": [
@@ -156,10 +156,13 @@ class DocumentClassifier:
             best_type = "unknown"
             confidence = 0.2
 
+        # スコアを 0 以上にクランプ（ネガティブキーワードで負になる場合）
+        clamped_scores = {k: max(0.0, v) for k, v in scores.items()}
+
         return ClassificationResult(
             doc_type=best_type,
             confidence=confidence,
-            scores=scores,
+            scores=clamped_scores,
         )
 
     def classify_from_keywords_only(self, text: str) -> str:

@@ -178,7 +178,7 @@ class InvoiceNumberValidator:
 
         total = 0
         for n in range(2, 14):  # n = 2〜13
-            a_n = d[13 - n]     # 右から n 番目 = インデックス 13-n
+            a_n = d[n - 1]      # 左から n 番目 = インデックス n-1
             p_n = 2 if n % 2 == 0 else 1
             total += a_n * p_n
 

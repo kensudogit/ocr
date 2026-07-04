@@ -209,6 +209,9 @@ class PiiMasker:
         """Luhn アルゴリズムでクレジットカード番号を検証する。"""
         if not digits.isdigit() or len(digits) < 13:
             return False
+        # 全桁が同一の番号は無効（例: 0000000000000000）
+        if len(set(digits)) == 1:
+            return False
         total = 0
         for i, d in enumerate(reversed(digits)):
             n = int(d)

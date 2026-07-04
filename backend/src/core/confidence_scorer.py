@@ -132,7 +132,7 @@ class ConfidenceScorer:
         elif fields.total_amount:
             # 合計金額が既知なら消費税がなくても低スコアで許容
             field_scores["tax_amount"] = 0.3
-            flags.append("消費税額が不明（10%税区分で計算してください）")
+            reasons.append("消費税額が不明（10%税区分で計算してください）")
         else:
             field_scores["tax_amount"] = 0.0
 

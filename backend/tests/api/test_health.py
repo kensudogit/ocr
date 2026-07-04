@@ -92,7 +92,7 @@ class TestAppConfiguration:
 
     def test_routers_are_registered(self):
         """主要ルーターが登録されていること。"""
-        route_paths = [route.path for route in app.routes]
+        route_paths = [getattr(route, "path", "") for route in app.routes]
         # 主要エンドポイントが存在すること
         assert any("/upload" in p for p in route_paths)
         assert any("/documents" in p for p in route_paths)
