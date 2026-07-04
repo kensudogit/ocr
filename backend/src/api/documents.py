@@ -12,7 +12,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.document_storage import document_has_file, load_document_bytes
+from src.core.document_storage import (
+    delete_document_from_db,
+    document_has_file,
+    load_document_bytes,
+    purge_document_files,
+)
 from src.core.rule_engine import get_rule_engine
 from src.db.database import get_db
 from src.db.models import BatchJob, DocStatus, Document, ExtractedData, JournalHistory, LineItem
@@ -367,13 +372,26 @@ async def reject_document(
 
 @router.delete("/{doc_id}", summary="書類を削除する")
 async def delete_document(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """書類とその抽出データを削除する。"""
+    """書類と関連テーブルの全レコードを削除する。
+
+    削除対象テーブル:
+      - documents, extracted_data, line_items,
+        export_logs, scan_timestamps
+      - journal_history の document_id は NULL に更新（履歴は保持）
+    """
     doc = (await db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="書類が見つかりません")
-    await db.delete(doc)
-    await db.flush()
-    return {"message": "書類を削除しました"}
+
+    filename = doc.original_filename
+    purge_document_files(doc)
+    await delete_document_from_db(doc_id, db)
+
+    return {
+        "message": "書類を削除しました",
+        "document_id": str(doc_id),
+        "deleted_filename": filename,
+    }
 
 
 @router.get("/stats/summary", summary="統計サマリー")

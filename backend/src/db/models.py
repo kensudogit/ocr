@@ -190,7 +190,10 @@ class Document(Base):
         "LineItem", back_populates="document", cascade="all, delete-orphan"
     )
     export_logs: Mapped[list[ExportLog]] = relationship(
-        "ExportLog", back_populates="document"
+        "ExportLog", back_populates="document", cascade="all, delete-orphan"
+    )
+    scan_timestamp: Mapped["ScanTimestamp | None"] = relationship(
+        "ScanTimestamp", back_populates="document", uselist=False, cascade="all, delete-orphan"
     )
     batch_job: Mapped[BatchJob | None] = relationship("BatchJob", back_populates="documents")
 
@@ -477,3 +480,5 @@ class ScanTimestamp(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+    document: Mapped["Document"] = relationship("Document", back_populates="scan_timestamp")

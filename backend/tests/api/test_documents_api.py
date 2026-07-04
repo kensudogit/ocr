@@ -122,6 +122,60 @@ class TestDocumentApproveAPI:
 
 
 @pytest.mark.integration
+class TestDocumentDeleteAPI:
+    """書類削除 API のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_returns_404(self):
+        """存在しない書類の削除は 404 を返すこと。"""
+        nonexistent_id = str(uuid.uuid4())
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.delete(f"/documents/{nonexistent_id}")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_document_from_db(self):
+        """削除後、documents / extracted_data テーブルからレコードが消えること。"""
+        from sqlalchemy import select
+
+        from tests.conftest import _TestSessionLocal
+        from src.db.models import Document, ExtractedData, DocStatus
+
+        doc_id = uuid.uuid4()
+        async with _TestSessionLocal() as session:
+            doc = Document(
+                id=doc_id,
+                original_filename="test_delete.pdf",
+                stored_filename=f"{doc_id}.pdf",
+                file_path="/tmp/nonexistent.pdf",
+                file_size_bytes=100,
+                mime_type="application/pdf",
+                status=DocStatus.PENDING,
+            )
+            session.add(doc)
+            session.add(ExtractedData(document_id=doc_id, vendor_name="テスト"))
+            await session.commit()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.delete(f"/documents/{doc_id}")
+        assert response.status_code == 200
+
+        async with _TestSessionLocal() as session:
+            doc = (await session.execute(
+                select(Document).where(Document.id == doc_id)
+            )).scalar_one_or_none()
+            ex = (await session.execute(
+                select(ExtractedData).where(ExtractedData.document_id == doc_id)
+            )).scalar_one_or_none()
+            assert doc is None
+            assert ex is None
+
+
+@pytest.mark.integration
 class TestDocumentStatsAPI:
     """書類統計 API のテスト。"""
 

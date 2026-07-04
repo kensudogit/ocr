@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -27,7 +27,7 @@ from src.core.audit_log import AuditEventType, get_audit_logger
 from src.core.classifier import DocumentClassifier
 from src.core.confidence_scorer import ConfidenceScorer, ConfidenceTier
 from src.core.electronic_bookkeeping import ElectronicBookkeepingStorage, ElectronicBookkeepingValidator
-from src.core.document_storage import document_has_file, load_document_bytes
+from src.core.document_storage import clear_ocr_results, document_has_file, load_document_bytes
 from src.core.invoice_validator import InvoiceNumberValidator
 from src.core.pii_masker import PiiMasker
 from src.core.preprocessor import ImagePreprocessor
@@ -111,10 +111,7 @@ async def _load_rule_engine_for_client(client_id: str | None, db: AsyncSession) 
 
 async def _clear_existing_ocr_results(doc_id: uuid.UUID, db: AsyncSession) -> None:
     """再処理時に既存の OCR 結果を削除する（UNIQUE 制約違反を防ぐ）。"""
-    await db.execute(delete(LineItem).where(LineItem.document_id == doc_id))
-    await db.execute(delete(ExtractedData).where(ExtractedData.document_id == doc_id))
-    await db.execute(delete(ScanTimestamp).where(ScanTimestamp.document_id == doc_id))
-    await db.flush()
+    await clear_ocr_results(doc_id, db)
 
 
 # ── メイン処理パイプライン ────────────────────────────────────────────

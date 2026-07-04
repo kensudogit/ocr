@@ -7,13 +7,22 @@ from __future__ import annotations
 
 import base64
 import logging
+import stat
 from pathlib import Path
 import uuid
 
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.db.models import Document
+from src.db.models import (
+    Document,
+    ExportLog,
+    ExtractedData,
+    JournalHistory,
+    LineItem,
+    ScanTimestamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +96,48 @@ def document_has_file(doc: Document) -> bool:
     if doc.file_path and Path(doc.file_path).exists():
         return True
     return originals_filepath(doc.id, doc).exists()
+
+
+async def clear_ocr_results(doc_id: uuid.UUID, db: AsyncSession) -> None:
+    """OCR 関連レコードのみ削除する（documents 行は残す。再OCR 用）。"""
+    await db.execute(delete(LineItem).where(LineItem.document_id == doc_id))
+    await db.execute(delete(ExtractedData).where(ExtractedData.document_id == doc_id))
+    await db.execute(delete(ScanTimestamp).where(ScanTimestamp.document_id == doc_id))
+    await db.flush()
+
+
+async def delete_document_from_db(doc_id: uuid.UUID, db: AsyncSession) -> None:
+    """書類と全関連レコードを DB テーブルから削除する。
+
+    旧スキーマで FK CASCADE が未設定の環境でも確実に削除するため、
+    子テーブルを明示的に DELETE してから documents を削除する。
+    """
+    await db.execute(delete(LineItem).where(LineItem.document_id == doc_id))
+    await db.execute(delete(ExtractedData).where(ExtractedData.document_id == doc_id))
+    await db.execute(delete(ExportLog).where(ExportLog.document_id == doc_id))
+    await db.execute(delete(ScanTimestamp).where(ScanTimestamp.document_id == doc_id))
+    # 学習用履歴は document_id のみ NULL に（仕訳パターンは保持）
+    await db.execute(
+        update(JournalHistory)
+        .where(JournalHistory.document_id == doc_id)
+        .values(document_id=None)
+    )
+    await db.execute(delete(Document).where(Document.id == doc_id))
+    await db.flush()
+
+
+def purge_document_files(doc: Document) -> None:
+    """ディスク上の関連ファイルを削除する（ベストエフォート）。"""
+    if doc.file_path:
+        try:
+            Path(doc.file_path).unlink(missing_ok=True)
+        except OSError as exc:
+            logger.debug("upload ファイル削除: %s", exc)
+
+    try:
+        orig = originals_filepath(doc.id, doc)
+        if orig.exists():
+            orig.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            orig.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.debug("原本ファイル削除: %s", exc)
