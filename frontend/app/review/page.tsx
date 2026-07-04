@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   documentsApi,
+  uploadApi,
   formatCurrency,
   formatDate,
   DOC_TYPE_LABELS,
@@ -272,11 +273,13 @@ function ExtractionForm({
   onSave,
   onApprove,
   onReject,
+  onReprocess,
 }: {
   detail: DocumentDetail;
   onSave: (data: Partial<ExtractedData>) => Promise<void>;
   onApprove: () => Promise<void>;
   onReject: (reason: string) => Promise<void>;
+  onReprocess: () => Promise<void>;
 }) {
   const ex = detail.extracted;
   const [form, setForm] = useState<Partial<ExtractedData>>({
@@ -298,6 +301,7 @@ function ExtractionForm({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
 
@@ -555,6 +559,23 @@ function ExtractionForm({
 
       {/* アクションボタン */}
       <div className="flex flex-wrap gap-2 pb-4">
+        {/* 再OCR処理ボタン — 抽出データが空または不正確な場合に使用 */}
+        <button
+          onClick={async () => {
+            setReprocessing(true);
+            try { await onReprocess(); }
+            finally { setReprocessing(false); }
+          }}
+          disabled={reprocessing}
+          className="w-full py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+          title="AI-OCR を再実行して抽出データを更新します"
+        >
+          {reprocessing ? (
+            <><span className="animate-spin inline-block">⏳</span> OCR 処理中…</>
+          ) : (
+            <>🔄 再OCR処理（抽出データを更新）</>
+          )}
+        </button>
         <button
           onClick={handleSave}
           disabled={saving}
@@ -662,6 +683,21 @@ function ReviewPageInner() {
     } catch (e: unknown) { showFeedback("error", e instanceof Error ? e.message : "差し戻し失敗"); }
   };
 
+  const handleReprocess = async () => {
+    if (!selectedId) return;
+    try {
+      showFeedback("success", "🔄 再OCR処理を開始しました…");
+      await uploadApi.reprocess(selectedId);
+      // 処理完了後にdetailを再取得して抽出データを更新
+      const updated = await documentsApi.get(selectedId);
+      setDetail(updated);
+      await loadDocs();
+      showFeedback("success", "✅ 再OCR処理が完了しました");
+    } catch (e: unknown) {
+      showFeedback("error", e instanceof Error ? e.message : "再OCR処理に失敗しました");
+    }
+  };
+
   // 確認待ち件数の集計
   const needsReviewCount = docs.filter(
     (d) => d.confidence_tier === "needs_review" || d.confidence_tier === "manual_input"
@@ -755,6 +791,7 @@ function ReviewPageInner() {
               onSave={handleSave}
               onApprove={handleApprove}
               onReject={handleReject}
+              onReprocess={handleReprocess}
             />
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 flex items-center justify-center h-full text-slate-400">
