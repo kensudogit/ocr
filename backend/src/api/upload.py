@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -109,6 +109,14 @@ async def _load_rule_engine_for_client(client_id: str | None, db: AsyncSession) 
     _rule_engine.load_from_history(tuples, client_id=client_id)
 
 
+async def _clear_existing_ocr_results(doc_id: uuid.UUID, db: AsyncSession) -> None:
+    """再処理時に既存の OCR 結果を削除する（UNIQUE 制約違反を防ぐ）。"""
+    await db.execute(delete(LineItem).where(LineItem.document_id == doc_id))
+    await db.execute(delete(ExtractedData).where(ExtractedData.document_id == doc_id))
+    await db.execute(delete(ScanTimestamp).where(ScanTimestamp.document_id == doc_id))
+    await db.flush()
+
+
 # ── メイン処理パイプライン ────────────────────────────────────────────
 
 async def _process_document(
@@ -123,6 +131,11 @@ async def _process_document(
         return
 
     doc.status = DocStatus.PROCESSING
+    doc.processing_error = None
+    doc.review_flags = None
+    doc.approved_at = None
+    doc.approved_by = None
+    await _clear_existing_ocr_results(doc_id, db)
     await db.flush()
 
     start = time.perf_counter()
@@ -337,8 +350,22 @@ async def _process_document(
         logger.exception("OCR 処理エラー (doc_id=%s): %s", doc_id, exc)
         doc.status = DocStatus.UPLOADED
         doc.processing_error = str(exc)
+        try:
+            await db.flush()
+        except Exception as flush_exc:
+            logger.exception("flush 失敗 (doc_id=%s): %s", doc_id, flush_exc)
+            raise
+        return
 
-    await db.flush()
+    try:
+        await db.flush()
+    except Exception as exc:
+        logger.exception("OCR 結果保存エラー (doc_id=%s): %s", doc_id, exc)
+        doc.status = DocStatus.UPLOADED
+        doc.processing_error = str(exc)
+        await db.flush()
+        return
+
     elapsed = (time.perf_counter() - start) * 1000
     logger.info(
         "処理完了 doc_id=%s tier=%s score=%.2f elapsed=%.0fms",
@@ -592,5 +619,25 @@ async def reprocess_document(
     doc = (await db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="書類が見つかりません")
-    await _process_document(doc_id, db, client_id=client_id or str(doc.client_id) if doc.client_id else None)
-    return {"message": "再処理完了", "document_id": str(doc_id), "status": doc.status}
+    if not doc.file_content and not Path(doc.file_path).exists():
+        raise HTTPException(
+            status_code=400,
+            detail="原本ファイルが見つかりません。再アップロードしてください。",
+        )
+    await _process_document(
+        doc_id,
+        db,
+        client_id=client_id or (str(doc.client_id) if doc.client_id else None),
+    )
+    await db.refresh(doc)
+    if doc.processing_error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"再OCR処理に失敗しました: {doc.processing_error}",
+        )
+    return {
+        "message": "再処理完了",
+        "document_id": str(doc_id),
+        "status": doc.status,
+        "confidence_tier": doc.confidence_tier,
+    }
