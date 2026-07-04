@@ -63,7 +63,12 @@ function DocumentList({
   selectedId,
   onSelect,
   onDelete,
+  onBulkDelete,
   deletingId,
+  bulkDeleting,
+  checkedIds,
+  onToggleCheck,
+  onToggleCheckAll,
   filter,
   onFilterChange,
 }: {
@@ -71,7 +76,12 @@ function DocumentList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDelete: (doc: Document) => void;
+  onBulkDelete: () => void;
   deletingId: string | null;
+  bulkDeleting: boolean;
+  checkedIds: Set<string>;
+  onToggleCheck: (id: string) => void;
+  onToggleCheckAll: (ids: string[], checked: boolean) => void;
   filter: string;
   onFilterChange: (f: string) => void;
 }) {
@@ -79,12 +89,42 @@ function DocumentList({
     ? docs.filter((d) => d.confidence_tier === "needs_review" || d.confidence_tier === "manual_input")
     : docs;
 
+  const filteredIds = filtered.map((d) => d.id);
+  const checkedInView = filteredIds.filter((id) => checkedIds.has(id));
+  const allChecked = filtered.length > 0 && checkedInView.length === filtered.length;
+  const someChecked = checkedInView.length > 0;
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col h-full">
       <div className="px-3 py-3 border-b border-slate-100 bg-slate-50 space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-700 text-sm">書類一覧</h2>
           <span className="text-xs text-slate-400">{filtered.length} 件</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              ref={(el) => {
+                if (el) el.indeterminate = someChecked && !allChecked;
+              }}
+              onChange={(e) => onToggleCheckAll(filteredIds, e.target.checked)}
+              disabled={filtered.length === 0 || bulkDeleting}
+              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            全選択
+          </label>
+          {someChecked && (
+            <button
+              type="button"
+              onClick={onBulkDelete}
+              disabled={bulkDeleting}
+              className="flex-1 text-xs py-1 px-2 rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition-all disabled:opacity-50"
+            >
+              {bulkDeleting ? "削除中…" : `選択削除 (${checkedInView.length})`}
+            </button>
+          )}
         </div>
         <div className="flex gap-1">
           {[
@@ -109,13 +149,18 @@ function DocumentList({
       <div className="overflow-y-auto flex-1">
         {filtered.length === 0 ? (
           <div className="text-center py-8 text-slate-400">
-            <p className="text-2xl mb-1">✅</p>
-            <p className="text-sm">確認待ちの書類はありません</p>
+            <p className="text-2xl mb-1">{filter === "needs_review_only" ? "✅" : "📭"}</p>
+            <p className="text-sm">
+              {filter === "needs_review_only"
+                ? "確認待ちの書類はありません"
+                : "書類がありません"}
+            </p>
           </div>
         ) : (
           filtered.map((doc) => {
             const tierCfg = TIER_CONFIG[doc.confidence_tier as keyof typeof TIER_CONFIG];
-            const isDeleting = deletingId === doc.id;
+            const isDeleting = deletingId === doc.id || bulkDeleting;
+            const isChecked = checkedIds.has(doc.id);
             return (
               <div
                 key={doc.id}
@@ -126,9 +171,21 @@ function DocumentList({
                     : "hover:bg-slate-50 border-l-4 border-l-transparent",
                 ].join(" ")}
               >
+                <label
+                  className="shrink-0 px-2 flex items-center cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleCheck(doc.id)}
+                    disabled={bulkDeleting}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </label>
                 <button
                   onClick={() => onSelect(doc.id)}
-                  className="flex-1 min-w-0 text-left px-3 py-3"
+                  className="flex-1 min-w-0 text-left px-2 py-3"
                 >
                   <p className="text-xs font-medium text-slate-800 truncate">
                     {doc.original_filename}
@@ -702,12 +759,14 @@ function ReviewPageInner() {
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [listFilter, setListFilter] = useState("needs_review_only");
+  const [listFilter, setListFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   // 再OCR処理後にフォームを強制リマウントするためのキー
   const [reprocessKey, setReprocessKey] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -717,6 +776,16 @@ function ReviewPageInner() {
         page_size: 200,
       });
       setDocs(res.items);
+      setCheckedIds((prev) => {
+        const valid = new Set(res.items.map((d) => d.id));
+        const next = new Set([...prev].filter((id) => valid.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
+    } catch (e: unknown) {
+      setDocs([]);
+      const msg = e instanceof Error ? e.message : "書類一覧の取得に失敗しました";
+      setFeedback({ type: "error", msg });
+      setTimeout(() => setFeedback(null), 5000);
     } finally {
       setLoading(false);
     }
@@ -793,6 +862,62 @@ function ReviewPageInner() {
     }
   };
 
+  const handleToggleCheck = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleCheckAll = (ids: string[], checked: boolean) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) ids.forEach((id) => next.add(id));
+      else ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...checkedIds];
+    if (ids.length === 0) return;
+    if (
+      !window.confirm(
+        `選択した ${ids.length} 件の書類を削除しますか？\n\nDB テーブルからも完全に削除されます。この操作は取り消せません。`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const result = await documentsApi.bulkDelete(ids);
+      const deletedSet = new Set(result.deleted_ids);
+      setDocs((prev) => prev.filter((d) => !deletedSet.has(d.id)));
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        result.deleted_ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (selectedId && deletedSet.has(selectedId)) {
+        setSelectedId(null);
+        setDetail(null);
+      }
+      await loadDocs();
+      const msg =
+        result.not_found_ids.length > 0
+          ? `${result.deleted_count} 件を削除しました（${result.not_found_ids.length} 件は既に削除済み）`
+          : `${result.deleted_count} 件の書類を削除しました`;
+      showFeedback("success", msg);
+    } catch (e: unknown) {
+      showFeedback("error", e instanceof Error ? e.message : "一括削除に失敗しました");
+      await loadDocs();
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleDelete = async (doc: Document) => {
     if (
       !window.confirm(
@@ -806,6 +931,11 @@ function ReviewPageInner() {
       await documentsApi.delete(doc.id);
       // DB 削除成功後、即座に画面から除去
       setDocs((prev) => prev.filter((d) => d.id !== doc.id));
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(doc.id);
+        return next;
+      });
       if (selectedId === doc.id) {
         setSelectedId(null);
         setDetail(null);
@@ -880,7 +1010,12 @@ function ReviewPageInner() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               onDelete={handleDelete}
+              onBulkDelete={handleBulkDelete}
               deletingId={deletingId}
+              bulkDeleting={bulkDeleting}
+              checkedIds={checkedIds}
+              onToggleCheck={handleToggleCheck}
+              onToggleCheckAll={handleToggleCheckAll}
               filter={listFilter}
               onFilterChange={setListFilter}
             />

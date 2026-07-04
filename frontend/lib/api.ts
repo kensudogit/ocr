@@ -179,6 +179,20 @@ export const documentsApi = {
 
   /** 削除 */
   delete: (id: string) => request<{ message: string }>(`/documents/${id}`, { method: "DELETE" }),
+
+  /** 一括削除 */
+  bulkDelete: (ids: string[]) =>
+    request<{
+      message: string;
+      deleted_count: number;
+      deleted_ids: string[];
+      not_found_ids: string[];
+      deleted: boolean;
+    }>("/documents/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: ids }),
+    }),
 };
 
 // ── アップロード API ──────────────────────────────────────────────────

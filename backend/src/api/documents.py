@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -62,6 +63,11 @@ class DocumentListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BulkDeleteRequest(BaseModel):
+    """一括削除リクエスト。"""
+    document_ids: list[uuid.UUID]
 
 
 # ── エンドポイント ────────────────────────────────────────────────────
@@ -126,17 +132,60 @@ async def list_documents(
         })
 
     return JSONResponse(
-        content={
+        content=jsonable_encoder({
             "total": total,
             "page": page,
             "page_size": page_size,
             "items": items,
-        },
+        }),
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
 
 
 _logger = logging.getLogger(__name__)
+
+
+@router.post("/bulk-delete", summary="書類を一括削除する")
+async def bulk_delete_documents(
+    body: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """複数書類と関連テーブルのレコードを一括削除する。"""
+    if not body.document_ids:
+        raise HTTPException(status_code=400, detail="削除対象の書類 ID を指定してください")
+    if len(body.document_ids) > 200:
+        raise HTTPException(status_code=400, detail="一度に削除できるのは 200 件までです")
+
+    unique_ids = list(dict.fromkeys(body.document_ids))
+    deleted_ids: list[str] = []
+    not_found_ids: list[str] = []
+
+    for doc_id in unique_ids:
+        doc = (await db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
+        if not doc:
+            not_found_ids.append(str(doc_id))
+            continue
+
+        purge_document_files(doc)
+        await delete_document_from_db(doc_id, db)
+
+        remaining = (await db.execute(
+            select(Document).where(Document.id == doc_id)
+        )).scalar_one_or_none()
+        if remaining is not None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"DBからの削除に失敗しました: {doc_id}",
+            )
+        deleted_ids.append(str(doc_id))
+
+    return {
+        "message": f"{len(deleted_ids)} 件の書類を削除しました",
+        "deleted_count": len(deleted_ids),
+        "deleted_ids": deleted_ids,
+        "not_found_ids": not_found_ids,
+        "deleted": len(deleted_ids) > 0,
+    }
 
 
 @router.get("/{doc_id}/file", summary="書類の原本画像を配信する")

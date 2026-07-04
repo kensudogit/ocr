@@ -72,6 +72,36 @@ class TestDocumentsListAPI:
         assert response.status_code == 200
 
 
+    @pytest.mark.asyncio
+    async def test_get_documents_returns_json_with_items(self):
+        """一覧レスポンスが UUID/datetime を含む items を JSON として返せること。"""
+        from tests.conftest import _TestSessionLocal
+        from src.db.models import Document, DocStatus
+
+        doc_id = uuid.uuid4()
+        async with _TestSessionLocal() as session:
+            session.add(Document(
+                id=doc_id,
+                original_filename="list_json_test.pdf",
+                stored_filename=f"{doc_id}.pdf",
+                file_path="/tmp/nonexistent.pdf",
+                file_size_bytes=100,
+                mime_type="application/pdf",
+                status=DocStatus.PENDING,
+            ))
+            await session.commit()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get("/documents/")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        assert isinstance(data["items"], list)
+        assert any(item["id"] == str(doc_id) for item in data["items"])
+
+
 @pytest.mark.integration
 class TestDocumentDetailAPI:
     """書類詳細 API のテスト。"""
@@ -173,6 +203,62 @@ class TestDocumentDeleteAPI:
             )).scalar_one_or_none()
             assert doc is None
             assert ex is None
+
+
+@pytest.mark.integration
+class TestDocumentBulkDeleteAPI:
+    """書類一括削除 API のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_empty_returns_400(self):
+        """空リストの一括削除は 400 を返すこと。"""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post("/documents/bulk-delete", json={"document_ids": []})
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_removes_multiple_documents(self):
+        """複数書類を一括削除できること。"""
+        from sqlalchemy import select
+
+        from tests.conftest import _TestSessionLocal
+        from src.db.models import Document, ExtractedData, DocStatus
+
+        doc_ids = [uuid.uuid4(), uuid.uuid4()]
+        async with _TestSessionLocal() as session:
+            for i, doc_id in enumerate(doc_ids):
+                session.add(Document(
+                    id=doc_id,
+                    original_filename=f"bulk_{i}.pdf",
+                    stored_filename=f"{doc_id}.pdf",
+                    file_path="/tmp/nonexistent.pdf",
+                    file_size_bytes=100,
+                    mime_type="application/pdf",
+                    status=DocStatus.PENDING,
+                ))
+                session.add(ExtractedData(document_id=doc_id, vendor_name=f"テスト{i}"))
+            await session.commit()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/documents/bulk-delete",
+                json={"document_ids": [str(d) for d in doc_ids]},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted_count"] == 2
+        assert set(data["deleted_ids"]) == {str(d) for d in doc_ids}
+
+        async with _TestSessionLocal() as session:
+            for doc_id in doc_ids:
+                doc = (await session.execute(
+                    select(Document).where(Document.id == doc_id)
+                )).scalar_one_or_none()
+                assert doc is None
 
 
 @pytest.mark.integration
