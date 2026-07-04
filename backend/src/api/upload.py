@@ -27,7 +27,7 @@ from src.core.audit_log import AuditEventType, get_audit_logger
 from src.core.classifier import DocumentClassifier
 from src.core.confidence_scorer import ConfidenceScorer, ConfidenceTier
 from src.core.electronic_bookkeeping import ElectronicBookkeepingStorage, ElectronicBookkeepingValidator
-from src.core.extractor import DataExtractor
+from src.core.document_storage import document_has_file, load_document_bytes
 from src.core.invoice_validator import InvoiceNumberValidator
 from src.core.pii_masker import PiiMasker
 from src.core.preprocessor import ImagePreprocessor
@@ -140,11 +140,11 @@ async def _process_document(
 
     start = time.perf_counter()
     try:
-        # DB の file_content (base64) を優先し、なければファイルシステムから読む
-        if doc.file_content:
-            raw_bytes = base64.b64decode(doc.file_content)
-        else:
-            raw_bytes = _read_file_bytes(doc.file_path)
+        raw_bytes = await load_document_bytes(doc, db, backfill=True)
+        if raw_bytes is None:
+            raise ValueError(
+                "原本ファイルが見つかりません。アップロード画面から同じファイルを再アップロードしてください。"
+            )
 
         # ── 電子帳簿保存法: 原本保存 & 要件検証 ─────────────────
         image_hash, orig_path = _eb_storage.save_original(
@@ -619,10 +619,10 @@ async def reprocess_document(
     doc = (await db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="書類が見つかりません")
-    if not doc.file_content and not Path(doc.file_path).exists():
+    if not document_has_file(doc) and not doc.file_content:
         raise HTTPException(
             status_code=400,
-            detail="原本ファイルが見つかりません。再アップロードしてください。",
+            detail="原本ファイルが見つかりません。アップロード画面から同じファイルを再アップロードしてください。",
         )
     await _process_document(
         doc_id,

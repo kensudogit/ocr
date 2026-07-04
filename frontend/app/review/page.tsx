@@ -171,6 +171,12 @@ function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
     setLoadError(null);
     setBlobUrl(null);
 
+    if (doc.has_original_file === false) {
+      setLoadError("no-file");
+      setLoading(false);
+      return;
+    }
+
     fetch(fileSrc)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -196,7 +202,7 @@ function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
         return null;
       });
     };
-  }, [doc.id, fileSrc]);
+  }, [doc.id, fileSrc, doc.has_original_file]);
 
   return (
     <div className="bg-slate-900 rounded-xl overflow-hidden flex flex-col h-full">
@@ -237,15 +243,23 @@ function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
         {loading ? (
           <div className="text-slate-400 text-sm animate-pulse">読み込み中…</div>
         ) : loadError ? (
-          <div className="flex flex-col items-center justify-center text-slate-400 gap-2 py-8">
+          <div className="flex flex-col items-center justify-center text-slate-400 gap-2 py-8 px-4">
             <svg className="w-12 h-12 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <p className="text-sm font-medium">画像を読み込めません</p>
-            <p className="text-xs text-slate-500 text-center">
-              再アップロードすると表示されます
+            <p className="text-xs text-slate-500 text-center leading-relaxed">
+              {doc.has_original_file === false
+                ? "原本ファイルがDBに保存されていません。同じファイルをアップロード画面から再アップロードしてください。"
+                : "読み込みに失敗しました。ページを更新するか、再アップロードしてください。"}
             </p>
+            <a
+              href="/upload"
+              className="text-xs text-sky-400 underline mt-1 hover:text-sky-300"
+            >
+              アップロード画面へ →
+            </a>
           </div>
         ) : isPdf ? (
           <iframe
@@ -356,6 +370,16 @@ function ExtractionForm({
 
   return (
     <div className="space-y-3 h-full overflow-y-auto">
+      {detail.has_original_file === false && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-semibold">⚠️ 原本画像が保存されていません</p>
+          <p className="mt-1">
+            この書類は修正前にアップロードされたため、画像データがありません。
+            <a href="/upload" className="text-sky-600 underline ml-1">アップロード画面</a>
+            から同じファイルを再アップロードしてください。
+          </p>
+        </div>
+      )}
       {/* 信頼度バナー */}
       {tierCfg && (
         <div className={`rounded-xl border p-3 ${tierCfg.color}`}>
@@ -586,9 +610,13 @@ function ExtractionForm({
             try { await onReprocess(); }
             finally { setReprocessing(false); }
           }}
-          disabled={reprocessing}
-          className="w-full py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
-          title="AI-OCR を再実行して抽出データを更新します"
+          disabled={reprocessing || detail.has_original_file === false}
+          className="w-full py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={
+            detail.has_original_file === false
+              ? "原本ファイルがないため再OCRできません。再アップロードしてください"
+              : "AI-OCR を再実行して抽出データを更新します"
+          }
         >
           {reprocessing ? (
             <><span className="animate-spin inline-block">⏳</span> OCR 処理中…</>

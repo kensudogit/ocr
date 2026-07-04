@@ -1,11 +1,9 @@
 """書類 CRUD API エンドポイント。"""
 from __future__ import annotations
 
-import base64
 import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -14,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.document_storage import document_has_file, load_document_bytes
 from src.core.rule_engine import get_rule_engine
 from src.db.database import get_db
 from src.db.models import BatchJob, DocStatus, Document, ExtractedData, JournalHistory, LineItem
@@ -118,6 +117,7 @@ async def list_documents(
             "confidence_score": float(doc.confidence_score) if doc.confidence_score else None,
             "arithmetic_check_ok": doc.arithmetic_check_ok,
             "review_flags": doc.review_flags or [],
+            "has_original_file": bool(doc.file_content) or document_has_file(doc),
         })
 
     return {
@@ -148,20 +148,9 @@ async def get_document_file(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
     mime = doc.mime_type or "application/octet-stream"
 
-    # 1. DB の base64 テキストから復元
-    if doc.file_content:
-        try:
-            raw = base64.b64decode(doc.file_content)
-            _logger.debug("file served from DB: doc_id=%s size=%d", doc_id, len(raw))
-            return Response(content=raw, media_type=mime)
-        except Exception as exc:
-            _logger.warning("base64 decode 失敗 doc_id=%s: %s", doc_id, exc)
-
-    # 2. ローカルファイルシステムへフォールバック
-    file_path = Path(doc.file_path) if doc.file_path else None
-    if file_path and file_path.exists():
-        _logger.debug("file served from FS: %s", file_path)
-        return Response(content=file_path.read_bytes(), media_type=mime)
+    raw = await load_document_bytes(doc, db, backfill=True)
+    if raw:
+        return Response(content=raw, media_type=mime)
 
     _logger.warning(
         "file not found: doc_id=%s file_content=%s file_path=%s",
@@ -251,6 +240,12 @@ async def get_document(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
             }
             for log in doc.export_logs
         ],
+        "confidence_tier": doc.confidence_tier,
+        "confidence_score": float(doc.confidence_score) if doc.confidence_score else None,
+        "arithmetic_check_ok": doc.arithmetic_check_ok,
+        "review_flags": doc.review_flags or [],
+        "processing_error": doc.processing_error,
+        "has_original_file": document_has_file(doc),
     }
 
 

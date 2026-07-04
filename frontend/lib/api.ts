@@ -49,6 +49,7 @@ export interface Document {
   confidence_score: number | null;
   arithmetic_check_ok: boolean | null;
   review_flags: string[];
+  has_original_file?: boolean;
 }
 
 export interface DocumentDetail extends Document {
@@ -63,6 +64,7 @@ export interface DocumentDetail extends Document {
   extracted: ExtractedData | null;
   line_items: LineItem[];
   export_logs: ExportLog[];
+  processing_error?: string | null;
 }
 
 export interface LineItem {
