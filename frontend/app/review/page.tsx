@@ -62,12 +62,16 @@ function DocumentList({
   docs,
   selectedId,
   onSelect,
+  onDelete,
+  deletingId,
   filter,
   onFilterChange,
 }: {
   docs: Document[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDelete: (doc: Document) => void;
+  deletingId: string | null;
   filter: string;
   onFilterChange: (f: string) => void;
 }) {
@@ -111,40 +115,63 @@ function DocumentList({
         ) : (
           filtered.map((doc) => {
             const tierCfg = TIER_CONFIG[doc.confidence_tier as keyof typeof TIER_CONFIG];
+            const isDeleting = deletingId === doc.id;
             return (
-              <button
+              <div
                 key={doc.id}
-                onClick={() => onSelect(doc.id)}
                 className={[
-                  "w-full text-left px-3 py-3 border-b border-slate-50 transition-all",
+                  "flex items-stretch border-b border-slate-50 transition-all group",
                   selectedId === doc.id
                     ? "bg-blue-50 border-l-4 border-l-blue-500"
-                    : "hover:bg-slate-50",
+                    : "hover:bg-slate-50 border-l-4 border-l-transparent",
                 ].join(" ")}
               >
-                <p className="text-xs font-medium text-slate-800 truncate">
-                  {doc.original_filename}
-                </p>
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  {tierCfg && (
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full border font-medium ${tierCfg.color}`}>
-                      {tierCfg.icon} {tierCfg.label}
-                    </span>
-                  )}
-                  <span className="text-xs text-slate-400">
-                    {DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type}
-                  </span>
-                </div>
-                {doc.total_amount && (
-                  <p className="text-xs font-semibold text-slate-700 mt-0.5">
-                    {formatCurrency(doc.total_amount)}
+                <button
+                  onClick={() => onSelect(doc.id)}
+                  className="flex-1 min-w-0 text-left px-3 py-3"
+                >
+                  <p className="text-xs font-medium text-slate-800 truncate">
+                    {doc.original_filename}
                   </p>
-                )}
-                {/* 検算エラー表示 */}
-                {doc.arithmetic_check_ok === false && (
-                  <p className="text-xs text-red-500 mt-0.5">⚡ 検算不一致</p>
-                )}
-              </button>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {tierCfg && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full border font-medium ${tierCfg.color}`}>
+                        {tierCfg.icon} {tierCfg.label}
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-400">
+                      {DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type}
+                    </span>
+                  </div>
+                  {doc.total_amount && (
+                    <p className="text-xs font-semibold text-slate-700 mt-0.5">
+                      {formatCurrency(doc.total_amount)}
+                    </p>
+                  )}
+                  {doc.arithmetic_check_ok === false && (
+                    <p className="text-xs text-red-500 mt-0.5">⚡ 検算不一致</p>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(doc);
+                  }}
+                  disabled={isDeleting}
+                  title="この書類を削除"
+                  className="shrink-0 px-2 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all disabled:opacity-40"
+                >
+                  {isDeleting ? (
+                    <span className="animate-spin text-xs">⏳</span>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             );
           })
         )}
@@ -680,6 +707,7 @@ function ReviewPageInner() {
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   // 再OCR処理後にフォームを強制リマウントするためのキー
   const [reprocessKey, setReprocessKey] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -750,6 +778,30 @@ function ReviewPageInner() {
     }
   };
 
+  const handleDelete = async (doc: Document) => {
+    if (
+      !window.confirm(
+        `「${doc.original_filename}」を削除しますか？\n\n抽出データも含め完全に削除されます。この操作は取り消せません。`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(doc.id);
+    try {
+      await documentsApi.delete(doc.id);
+      if (selectedId === doc.id) {
+        setSelectedId(null);
+        setDetail(null);
+      }
+      await loadDocs();
+      showFeedback("success", "書類を削除しました");
+    } catch (e: unknown) {
+      showFeedback("error", e instanceof Error ? e.message : "削除に失敗しました");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // 確認待ち件数の集計
   const needsReviewCount = docs.filter(
     (d) => d.confidence_tier === "needs_review" || d.confidence_tier === "manual_input"
@@ -807,6 +859,8 @@ function ReviewPageInner() {
               docs={docs}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onDelete={handleDelete}
+              deletingId={deletingId}
               filter={listFilter}
               onFilterChange={setListFilter}
             />
