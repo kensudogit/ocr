@@ -127,7 +127,11 @@ async def _process_document(
 
     start = time.perf_counter()
     try:
-        raw_bytes = _read_file_bytes(doc.file_path)
+        # DB の file_content (base64) を優先し、なければファイルシステムから読む
+        if doc.file_content:
+            raw_bytes = base64.b64decode(doc.file_content)
+        else:
+            raw_bytes = _read_file_bytes(doc.file_path)
 
         # ── 電子帳簿保存法: 原本保存 & 要件検証 ─────────────────
         image_hash, orig_path = _eb_storage.save_original(
@@ -162,6 +166,10 @@ async def _process_document(
         # PDF → 画像変換
         if doc.mime_type == "application/pdf" or doc.file_path.endswith(".pdf"):
             images_bytes = await asyncio.to_thread(_pdf_to_images, raw_bytes)
+            if not images_bytes:
+                raise ValueError(
+                    "PDF を画像に変換できませんでした（PyMuPDF/pdf2image が利用不可）"
+                )
             doc.page_count = len(images_bytes)
         else:
             images_bytes = [raw_bytes]
@@ -339,17 +347,61 @@ async def _process_document(
 
 
 def _pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
+    """PDF バイト列を PNG 画像バイト列のリストに変換する。
+
+    優先順位:
+      1. PyMuPDF (fitz) — requirements-poc.txt に含まれる軽量ライブラリ
+      2. pdf2image (poppler 必要) — ローカル環境用フォールバック
+      3. 変換不可の場合は空リストを返す（処理エラーを上流で処理）
+    """
+    import io as _io
+
+    # ── PyMuPDF (fitz) ────────────────────────────────────────
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        result = []
+        for page in doc:
+            # dpi=200 相当: zoom = 200/72 ≈ 2.78
+            mat = fitz.Matrix(200 / 72, 200 / 72)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            result.append(pix.tobytes("png"))
+        doc.close()
+        logger.debug("PyMuPDF で PDF を %d ページ変換しました", len(result))
+        return result
+    except ImportError:
+        pass  # PyMuPDF 未インストール → 次を試みる
+    except Exception as exc:
+        logger.warning("PyMuPDF PDF 変換エラー: %s", exc)
+
+    # ── pdf2image (poppler 必要) ──────────────────────────────
     try:
         from pdf2image import convert_from_bytes
         pages = convert_from_bytes(pdf_bytes, dpi=200)
         result = []
         for page in pages:
-            buf = __import__("io").BytesIO()
+            buf = _io.BytesIO()
             page.save(buf, format="PNG")
             result.append(buf.getvalue())
+        logger.debug("pdf2image で PDF を %d ページ変換しました", len(result))
         return result
     except ImportError:
-        return [pdf_bytes]
+        pass  # pdf2image 未インストール
+    except Exception as exc:
+        logger.warning("pdf2image PDF 変換エラー: %s", exc)
+
+    # ── フォールバック: pdfplumber でテキスト抽出のみ ──────────
+    try:
+        import pdfplumber
+        with pdfplumber.open(_io.BytesIO(pdf_bytes)) as pdf:
+            texts = [page.extract_text() or "" for page in pdf.pages]
+        logger.warning("PDF→画像変換不可。テキスト抽出のみ実行します")
+        # テキストを画像の代わりに返すことはできないため空リストで上流エラー処理へ
+        return []
+    except Exception:
+        pass
+
+    return []
 
 
 # ── エンドポイント ────────────────────────────────────────────────────
