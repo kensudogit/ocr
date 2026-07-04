@@ -165,42 +165,41 @@ async def startup() -> None:
 
 
 async def _migrate_add_file_content() -> None:
-    """既存の documents テーブルに file_content (TEXT/base64) カラムを追加する（冪等）。
+    """documents.file_content を TEXT (base64) カラムとして確保する（冪等）。
 
-    前回デプロイで BYTEA として作成済みの場合は削除して TEXT で再作成する。
-    データ損失は許容（BYTEA 版は表示できなかったため）。
+    DO $$ ブロックは asyncpg と相性が悪いため、Python 側で型チェックして対処する。
     """
     from src.db.database import engine
     from sqlalchemy import text
     try:
         async with engine.begin() as conn:
-            # 1. BYTEA で作成されていれば削除（前回デプロイの残骸）
-            #    PostgreSQL 専用構文のため SQLite では例外を無視
-            try:
-                await conn.execute(text("""
-                    DO $$BEGIN
-                      IF EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                         WHERE table_name='documents'
-                           AND column_name='file_content'
-                           AND udt_name='bytea'
-                      ) THEN
-                        ALTER TABLE documents DROP COLUMN file_content;
-                      END IF;
-                    END$$
-                """))
-            except Exception:
-                pass  # SQLite など非対応環境ではスキップ
+            # ① カラムの存在・型を確認（PostgreSQL の information_schema）
+            result = await conn.execute(text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_name='documents' AND column_name='file_content'"
+            ))
+            row = result.fetchone()
 
-            # 2. TEXT カラムとして追加（既に TEXT で存在する場合は重複エラーを無視）
-            try:
+            if row is None:
+                # カラム未存在 → TEXT で追加
                 await conn.execute(text(
                     "ALTER TABLE documents ADD COLUMN file_content TEXT"
                 ))
-            except Exception:
-                pass  # 既存の場合は無視
+                logger.info("migration: file_content TEXT カラムを追加しました")
+            elif row[0].lower() != "text":
+                # 型が違う（BYTEA 等）→ 削除して TEXT で再作成
+                await conn.execute(text(
+                    "ALTER TABLE documents DROP COLUMN file_content"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE documents ADD COLUMN file_content TEXT"
+                ))
+                logger.info("migration: file_content を %s から TEXT に変換しました", row[0])
+            else:
+                logger.info("migration: file_content TEXT カラムは既に存在します")
     except Exception as exc:
-        logger.debug("file_content マイグレーション: %s", exc)
+        # SQLite（テスト環境）では information_schema が無いためここに到達する
+        logger.debug("file_content マイグレーション（非PostgreSQL環境）: %s", exc)
 
 
 # ── ルート ───────────────────────────────────────────────────────────

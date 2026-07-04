@@ -381,6 +381,13 @@ async def upload_and_process(
         except ValueError:
             pass
 
+    # ephemeral FS 対策: ファイルバイナリを base64 テキストとして DB に保存
+    try:
+        _file_content_b64: str | None = base64.b64encode(_raw).decode("ascii") if _raw else None
+    except Exception as _enc_err:
+        logger.warning("base64 encode 失敗: %s", _enc_err)
+        _file_content_b64 = None
+
     doc = Document(
         original_filename=file.filename or stored_name,
         stored_filename=stored_name,
@@ -389,7 +396,7 @@ async def upload_and_process(
         mime_type=mime,
         status=DocStatus.UPLOADED,
         client_id=client_uuid,
-        file_content=base64.b64encode(_raw).decode("ascii"),  # ephemeral FS 対策: base64 テキストで DB に保存
+        file_content=_file_content_b64,
     )
     db.add(doc)
     await db.flush()
@@ -454,6 +461,10 @@ async def batch_upload(
     doc_ids: list[uuid.UUID] = []
     for file in files:
         stored_name, file_path, file_size, _raw = await _save_file(file)
+        try:
+            _b64 = base64.b64encode(_raw).decode("ascii") if _raw else None
+        except Exception:
+            _b64 = None
         doc = Document(
             original_filename=file.filename or stored_name,
             stored_filename=stored_name,
@@ -463,7 +474,7 @@ async def batch_upload(
             status=DocStatus.UPLOADED,
             batch_job_id=job_id,
             client_id=client_uuid,
-            file_content=base64.b64encode(_raw).decode("ascii"),  # ephemeral FS 対策
+            file_content=_b64,  # ephemeral FS 対策: base64 テキストで DB に保存
         )
         db.add(doc)
         await db.flush()

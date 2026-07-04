@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -127,6 +128,9 @@ async def list_documents(
     }
 
 
+_logger = logging.getLogger(__name__)
+
+
 @router.get("/{doc_id}/file", summary="書類の原本画像を配信する")
 async def get_document_file(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """書類の原本ファイルを返す。
@@ -148,15 +152,23 @@ async def get_document_file(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db
     if doc.file_content:
         try:
             raw = base64.b64decode(doc.file_content)
+            _logger.debug("file served from DB: doc_id=%s size=%d", doc_id, len(raw))
             return Response(content=raw, media_type=mime)
-        except Exception:
-            pass  # デコード失敗はフォールバックへ
+        except Exception as exc:
+            _logger.warning("base64 decode 失敗 doc_id=%s: %s", doc_id, exc)
 
     # 2. ローカルファイルシステムへフォールバック
     file_path = Path(doc.file_path) if doc.file_path else None
     if file_path and file_path.exists():
+        _logger.debug("file served from FS: %s", file_path)
         return Response(content=file_path.read_bytes(), media_type=mime)
 
+    _logger.warning(
+        "file not found: doc_id=%s file_content=%s file_path=%s",
+        doc_id,
+        "set" if doc.file_content else "null",
+        doc.file_path,
+    )
     raise HTTPException(
         status_code=404,
         detail="ファイルが見つかりません。再アップロードしてください。",
