@@ -116,6 +116,7 @@ export interface BatchJobStatus {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
+    cache: "no-store",
     ...init,
     headers: {
       ...(init?.headers || {}),
@@ -143,6 +144,8 @@ export const documentsApi = {
     if (params?.doc_type) qs.set("doc_type", params.doc_type);
     if (params?.page) qs.set("page", String(params.page));
     if (params?.page_size) qs.set("page_size", String(params.page_size));
+    // ブラウザ/CDN キャッシュ回避
+    qs.set("_", String(Date.now()));
     return request<DocumentListResponse>(`/documents?${qs}`);
   },
 

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -125,12 +125,15 @@ async def list_documents(
             "has_original_file": bool(doc.file_content) or document_has_file(doc),
         })
 
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "items": items,
-    }
+    return JSONResponse(
+        content={
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": items,
+        },
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 _logger = logging.getLogger(__name__)
@@ -387,10 +390,18 @@ async def delete_document(doc_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     purge_document_files(doc)
     await delete_document_from_db(doc_id, db)
 
+    # 削除確認（コミット前に同一セッションで検証）
+    remaining = (await db.execute(
+        select(Document).where(Document.id == doc_id)
+    )).scalar_one_or_none()
+    if remaining is not None:
+        raise HTTPException(status_code=500, detail="DBからの削除に失敗しました")
+
     return {
         "message": "書類を削除しました",
         "document_id": str(doc_id),
         "deleted_filename": filename,
+        "deleted": True,
     }
 
 

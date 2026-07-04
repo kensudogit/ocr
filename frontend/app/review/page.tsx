@@ -160,7 +160,7 @@ function DocumentList({
                   }}
                   disabled={isDeleting}
                   title="この書類を削除"
-                  className="shrink-0 px-2 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all disabled:opacity-40"
+                  className="shrink-0 px-2 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-70 group-hover:opacity-100 focus:opacity-100 transition-all disabled:opacity-40"
                 >
                   {isDeleting ? (
                     <span className="animate-spin text-xs">⏳</span>
@@ -724,10 +724,25 @@ function ReviewPageInner() {
 
   useEffect(() => { loadDocs(); }, [loadDocs]);
 
+  // タブ復帰時に一覧を再取得（他画面操作や DB 変更との同期）
+  useEffect(() => {
+    const onFocus = () => { loadDocs(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadDocs]);
+
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     setDetailLoading(true);
-    documentsApi.get(selectedId).then(setDetail).finally(() => setDetailLoading(false));
+    documentsApi.get(selectedId)
+      .then(setDetail)
+      .catch(() => {
+        // DB から削除済みの書類が選択されている場合は UI からも除去
+        setDetail(null);
+        setSelectedId(null);
+        setDocs((prev) => prev.filter((d) => d.id !== selectedId));
+      })
+      .finally(() => setDetailLoading(false));
   }, [selectedId]);
 
   const showFeedback = (type: "success" | "error", msg: string) => {
@@ -781,7 +796,7 @@ function ReviewPageInner() {
   const handleDelete = async (doc: Document) => {
     if (
       !window.confirm(
-        `「${doc.original_filename}」を削除しますか？\n\n抽出データも含め完全に削除されます。この操作は取り消せません。`
+        `「${doc.original_filename}」を削除しますか？\n\nDB テーブルからも完全に削除されます。この操作は取り消せません。`
       )
     ) {
       return;
@@ -789,14 +804,19 @@ function ReviewPageInner() {
     setDeletingId(doc.id);
     try {
       await documentsApi.delete(doc.id);
+      // DB 削除成功後、即座に画面から除去
+      setDocs((prev) => prev.filter((d) => d.id !== doc.id));
       if (selectedId === doc.id) {
         setSelectedId(null);
         setDetail(null);
       }
+      // サーバーと再同期
       await loadDocs();
       showFeedback("success", "書類を削除しました");
     } catch (e: unknown) {
       showFeedback("error", e instanceof Error ? e.message : "削除に失敗しました");
+      // 失敗時はサーバー状態で一覧を復元
+      await loadDocs();
     } finally {
       setDeletingId(null);
     }
