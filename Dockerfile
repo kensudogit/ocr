@@ -1,7 +1,6 @@
 # ============================================================
 # PoC Dockerfile: Next.js (frontend) + FastAPI (backend)
-# Uses PIL-only image processing — NO OpenCV system libs needed.
-# This keeps the image small and the build fast/reliable.
+# OpenCV headless + Azure DI + OpenAI 後処理パイプライン対応
 # ============================================================
 
 # ── Stage 1: Build Next.js frontend ──────────────────────────────────
@@ -22,11 +21,13 @@ RUN npm run build
 # ── Stage 2: Runtime ─────────────────────────────────────────────────
 FROM node:20-slim
 
-# Minimal system packages — PIL-only backend needs only python3 + curl
+# OpenCV headless 用システムライブラリ + Python ランタイム
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    libgl1 \
+    libglib2.0-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

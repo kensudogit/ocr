@@ -2,8 +2,8 @@
 
 処理フロー（全体 7 ステップ）:
   Step 1: 入力受付（単一 / 一括 / スマホ撮影バッチ）
-  Step 2: 画像前処理（傾き補正・感熱紙強調・ノイズ除去・複数枚分割）
-  Step 3: AI-OCR（VLM で構造化抽出）
+  Step 2: 画像前処理（OpenCV 傾き補正・CLAHE / PIL フォールバック）
+  Step 3: AI-OCR（Azure Document Intelligence → OpenAI 後処理 → VLM フォールバック）
   Step 4: ルール層（顧問先別の過去仕訳から勘定科目・税区分サジェスト）
   Step 5: 信頼度判定（自動確定 / 要確認 / 手入力 3段階＋検算）
   → 以降は確認 UI（フロントエンド）で担当者が処理
@@ -32,6 +32,7 @@ from src.core.invoice_validator import InvoiceNumberValidator
 from src.core.pii_masker import PiiMasker
 from src.core.preprocessor import ImagePreprocessor
 from src.core.rule_engine import get_rule_engine
+from src.core.enhanced_ocr_pipeline import EnhancedOcrPipeline
 from src.core.vlm_extractor import VlmExtractor
 from src.db.database import get_db
 from src.db.models import (
@@ -57,6 +58,7 @@ _preprocessor      = ImagePreprocessor(
     denoise_level=settings.denoise_level,
 )
 _vlm_extractor     = VlmExtractor()
+_enhanced_ocr      = EnhancedOcrPipeline()
 _classifier        = DocumentClassifier()
 _scorer            = ConfidenceScorer()
 _rule_engine       = get_rule_engine()
@@ -172,7 +174,7 @@ async def _process_document(
                 doc_id, eb_result.violations
             )
 
-        # ── Step 2: 画像前処理 ────────────────────────────────────
+        # ── Step 2–3: 画像前処理 + AI-OCR ─────────────────────────
         # PDF → 画像変換
         if doc.mime_type == "application/pdf" or doc.file_path.endswith(".pdf"):
             images_bytes = await asyncio.to_thread(_pdf_to_images, raw_bytes)
@@ -184,31 +186,38 @@ async def _process_document(
         else:
             images_bytes = [raw_bytes]
 
-        prep_results = []
+        first_page_bytes = images_bytes[0]
 
-        for page_bytes in images_bytes:
-            prep = await asyncio.to_thread(_preprocessor.process, page_bytes)
-            prep_results.append(prep)
-
-        # 1ページ目で書類分類
-        first_prep = prep_results[0]
-        aspect = first_prep.final_size[0] / max(first_prep.final_size[1], 1)
-
-        # ── Step 3: AI-OCR（VLM）────────────────────────────────
         # ルールエンジンを顧問先の過去仕訳でロード
         if client_id:
             await _load_rule_engine_for_client(client_id, db)
 
-        # ハイブリッドモード: 画像のメタデータ（テキスト部分）を PII マスク
-        # ※ VLM には画像を直接送るため、テキストベースマスクは OCR 結果に適用
         pii_mask_applied = _deploy_config.requires_pii_masking
 
-        # VLM で最初のページ（代表ページ）を解析
-        vlm_result = await _vlm_extractor.extract(
-            first_prep.pil_image,
-            client_id=client_id,
-        )
+        if _enhanced_ocr.enabled:
+            # OpenCV → Azure DI → OpenAI 後処理（失敗時 VLM フォールバック）
+            ocr_result = await _enhanced_ocr.extract(
+                first_page_bytes,
+                client_id=client_id,
+            )
+            first_prep = ocr_result.preprocessing
+            if first_prep is None:
+                first_prep = await asyncio.to_thread(
+                    _preprocessor.process, first_page_bytes
+                )
+            vlm_result = ocr_result
+        else:
+            # 従来: PIL 前処理 + VLM のみ
+            first_prep = await asyncio.to_thread(
+                _preprocessor.process, first_page_bytes
+            )
+            vlm_result = await _vlm_extractor.extract(
+                first_prep.pil_image,
+                client_id=client_id,
+            )
+
         fields = vlm_result.fields
+        aspect = first_prep.final_size[0] / max(first_prep.final_size[1], 1)
 
         # ── ハイブリッド: OCR テキストの PII マスク確認 ──────────
         if pii_mask_applied and doc.ocr_raw_text:
@@ -230,20 +239,29 @@ async def _process_document(
         doc.doc_type_confidence = max(clf.confidence, vlm_result.confidence_hint)
         doc.vlm_model_used = vlm_result.model_used
 
-        # OCR 生テキスト（VLM 生テキストまたは fallback テキスト）
-        doc.ocr_raw_text = "\n".join(
-            f"{k}: {v}"
-            for k, v in vlm_result.raw_json.items()
-            if v is not None and k not in ("line_items",)
-        ) if not vlm_result.fallback_used else ""
+        # OCR 生テキスト
+        if getattr(vlm_result, "ocr_raw_text", None):
+            doc.ocr_raw_text = vlm_result.ocr_raw_text
+        elif not vlm_result.fallback_used:
+            doc.ocr_raw_text = "\n".join(
+                f"{k}: {v}"
+                for k, v in vlm_result.raw_json.items()
+                if v is not None and k not in ("line_items",)
+            )
+        else:
+            doc.ocr_raw_text = ""
 
-        doc.preprocessing_applied = {
+        prep_meta: dict = {
             "steps": first_prep.applied_steps,
             "skew_angle": first_prep.skew_angle,
             "is_thermal": first_prep.is_thermal_paper,
             "quality_score": first_prep.confidence,
             "vlm_fallback": vlm_result.fallback_used,
         }
+        if getattr(vlm_result, "pipeline_steps", None):
+            prep_meta["pipeline_steps"] = vlm_result.pipeline_steps
+            prep_meta["ocr_engine"] = vlm_result.raw_json.get("ocr_engine", "hybrid")
+        doc.preprocessing_applied = prep_meta
 
         # ── インボイス登録番号ルールベース検証（AI 任せにしない）────
         # VLM の結果をルールベースで検証・補正する

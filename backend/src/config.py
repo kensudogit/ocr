@@ -64,6 +64,24 @@ class Settings(BaseSettings):
     google_vision_project_id: str = ""
     ocr_language: str = "ja"
 
+    # ── 認識率向上パイプライン（OpenCV + Azure DI + OpenAI） ─────
+    # "hybrid"       : OpenCV → Azure DI → OpenAI 後処理（推奨）
+    # "azure_openai" : Azure DI + OpenAI のみ（OpenCV 前処理あり）
+    # "vlm"          : 従来の VLM のみ
+    ocr_pipeline_mode: str = "hybrid"
+    use_opencv_preprocess: bool = True
+    use_openai_postprocess: bool = True
+
+    # Azure Document Intelligence
+    azure_di_endpoint: str = ""   # 例: https://xxx.cognitiveservices.azure.com
+    azure_di_key: str = ""
+    azure_di_model_default: str = "prebuilt-read"
+    azure_di_model_invoice: str = "prebuilt-invoice"
+    azure_di_model_receipt: str = "prebuilt-receipt"
+
+    # OpenAI 後処理モデル（テキスト補正用 — Vision より低コスト）
+    openai_postprocess_model: str = "gpt-4o-mini"
+
     # ── 画像前処理 ────────────────────────────────────────────
     # 感熱紙レシート用: コントラスト強調を有効化
     enhance_thermal_paper: bool = True

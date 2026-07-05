@@ -1,6 +1,5 @@
 # PoC requirements — minimal set, guaranteed to install on Railway (node:20-slim)
-# NO opencv / paddlepaddle / scikit-image / celery / redis / boto3
-# OCR is handled by OpenAI GPT-4o Vision or Gemini 2.0 Flash (API keys optional)
+# OCR: OpenCV前処理 + Azure Document Intelligence + OpenAI後処理（VLM フォールバック）
 
 # ── Web framework ──────────────────────────────────────────────────────
 fastapi==0.115.5
@@ -17,9 +16,10 @@ asyncpg>=0.29.0
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
 
-# ── Image (PIL only — no OpenCV system libs needed) ───────────────────
+# ── Image (PIL + OpenCV headless) ─────────────────────────────────────
 Pillow==11.0.0
 numpy==1.26.4
+opencv-python-headless==4.10.0.84
 
 # ── Text normalization ────────────────────────────────────────────────
 python-dateutil==2.9.0
