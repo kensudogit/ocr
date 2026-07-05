@@ -323,9 +323,9 @@ function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
           )}
         </div>
       </div>
-      <div className="overflow-auto flex-1 p-3 flex items-center justify-center">
+      <div className="overflow-auto flex-1 p-2 flex items-start justify-center min-h-0">
         {loading ? (
-          <div className="text-slate-400 text-sm animate-pulse">読み込み中…</div>
+          <div className="text-slate-400 text-sm animate-pulse m-auto">読み込み中…</div>
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center text-slate-400 gap-2 py-8 px-4">
             <svg className="w-12 h-12 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -356,8 +356,8 @@ function OriginalImagePanel({ doc }: { doc: DocumentDetail }) {
           <img
             src={blobUrl!}
             alt={doc.original_filename}
-            style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
-            className="max-w-none transition-transform"
+            style={{ width: `${Math.round(zoom * 100)}%` }}
+            className="h-auto max-w-none block"
           />
         )}
       </div>
@@ -996,8 +996,8 @@ function ReviewPageInner() {
         </div>
       )}
 
-      {/* 3カラムレイアウト: 書類一覧 | 原本画像 | 抽出データ */}
-      <div className="grid grid-cols-[220px_1fr_1fr] gap-3 h-[calc(100vh-160px)]">
+      {/* 3カラム: 書類一覧(固定) | 原本画像(広め) | 抽出データ */}
+      <div className="grid grid-cols-[minmax(180px,200px)_minmax(0,2.2fr)_minmax(320px,1fr)] gap-3 h-[calc(100vh-160px)]">
         {/* 左: 書類一覧 */}
         <div className="overflow-hidden">
           {loading ? (
