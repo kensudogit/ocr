@@ -30,6 +30,7 @@ from src.core.electronic_bookkeeping import ElectronicBookkeepingStorage, Electr
 from src.core.document_storage import clear_ocr_results, document_has_file, load_document_bytes
 from src.core.invoice_validator import InvoiceNumberValidator
 from src.core.pii_masker import PiiMasker
+from src.core.practice_profile import effective_batch_concurrency, is_peak_season
 from src.core.preprocessor import ImagePreprocessor
 from src.core.rule_engine import get_rule_engine
 from src.core.enhanced_ocr_pipeline import EnhancedOcrPipeline
@@ -219,37 +220,42 @@ async def _process_document(
         fields = vlm_result.fields
         aspect = first_prep.final_size[0] / max(first_prep.final_size[1], 1)
 
-        # ── ハイブリッド: OCR テキストの PII マスク確認 ──────────
-        if pii_mask_applied and doc.ocr_raw_text:
-            mask_result = _pii_masker.mask(doc.ocr_raw_text)
-            if mask_result.mask_count > 0:
-                logger.info(
-                    "PII マスク適用: doc=%s, マスク件数=%d",
-                    doc_id, mask_result.mask_count
-                )
-
-        # 書類分類（VLM の doc_type 提案 + classifier）
-        clf = _classifier.classify(
-            "",
-            is_thermal=first_prep.is_thermal_paper,
-            image_aspect_ratio=aspect,
-        )
-        doc_type = vlm_result.raw_json.get("doc_type") or clf.doc_type
-        doc.doc_type = doc_type
-        doc.doc_type_confidence = max(clf.confidence, vlm_result.confidence_hint)
-        doc.vlm_model_used = vlm_result.model_used
-
-        # OCR 生テキスト
+        # OCR 生テキスト（分類・PII 処理の前に確定）
         if getattr(vlm_result, "ocr_raw_text", None):
-            doc.ocr_raw_text = vlm_result.ocr_raw_text
+            ocr_text_raw = vlm_result.ocr_raw_text
         elif not vlm_result.fallback_used:
-            doc.ocr_raw_text = "\n".join(
+            ocr_text_raw = "\n".join(
                 f"{k}: {v}"
                 for k, v in vlm_result.raw_json.items()
                 if v is not None and k not in ("line_items",)
             )
         else:
-            doc.ocr_raw_text = ""
+            ocr_text_raw = ""
+
+        # ハイブリッド: 機微情報をマスクしてから DB 保存
+        if pii_mask_applied and ocr_text_raw:
+            mask_result = _pii_masker.mask(ocr_text_raw)
+            doc.ocr_raw_text = mask_result.masked_text
+            if mask_result.mask_count > 0:
+                logger.info(
+                    "PII マスク適用: doc=%s, マスク件数=%d",
+                    doc_id, mask_result.mask_count
+                )
+        else:
+            doc.ocr_raw_text = ocr_text_raw
+
+        # 書類分類（OCR テキスト + 画像特徴）
+        clf = _classifier.classify(
+            doc.ocr_raw_text or ocr_text_raw,
+            is_thermal=first_prep.is_thermal_paper,
+            image_aspect_ratio=aspect,
+        )
+        doc_type = vlm_result.raw_json.get("doc_type") or clf.doc_type
+        if doc_type == "unknown" and clf.doc_type != "unknown":
+            doc_type = clf.doc_type
+        doc.doc_type = doc_type
+        doc.doc_type_confidence = max(clf.confidence, vlm_result.confidence_hint)
+        doc.vlm_model_used = vlm_result.model_used
 
         prep_meta: dict = {
             "steps": first_prep.applied_steps,
@@ -308,6 +314,7 @@ async def _process_document(
             fields,
             vlm_confidence=vlm_result.confidence_hint,
             rule_confidence=rule_suggestion.confidence,
+            doc_type=doc_type,
         )
 
         # 信頼度情報を Document に記録
@@ -528,10 +535,14 @@ async def batch_upload(
 ):
     """複数ファイルを一括アップロードしてバックグラウンドで処理する。
 
-    月500枚以上の一括処理に対応。処理完了後に /upload/batch/{id}/status で確認。
+    月500枚以上の一括処理に対応（確定申告期は並列数を自動増加）。
+    処理完了後に /upload/batch/{id}/status で確認。
     """
-    if len(files) > 200:
-        raise HTTPException(status_code=400, detail="一度に200ファイルまで")
+    if len(files) > settings.batch_max_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一度に{settings.batch_max_files}ファイルまで",
+        )
 
     for f in files:
         _validate_file(f)
@@ -577,22 +588,44 @@ async def batch_upload(
     async def _run_batch():
         from src.db.database import AsyncSessionLocal
         from datetime import datetime as _dt
+        from sqlalchemy import select as _sel
+
+        concurrency = effective_batch_concurrency(
+            settings.batch_concurrency,
+            settings.batch_concurrency_peak,
+        )
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _process_one(did: uuid.UUID) -> bool:
+            async with sem:
+                async with AsyncSessionLocal() as session:
+                    try:
+                        await _process_document(did, session, client_id=client_id)
+                        await session.commit()
+                        return True
+                    except Exception as exc:
+                        logger.error("バッチ処理エラー doc=%s: %s", did, exc)
+                        await session.rollback()
+                        return False
+
         async with AsyncSessionLocal() as session:
-            from sqlalchemy import select as _sel
-            batch = (await session.execute(_sel(BatchJob).where(BatchJob.id == job_id))).scalar_one()
+            batch = (await session.execute(
+                _sel(BatchJob).where(BatchJob.id == job_id)
+            )).scalar_one()
             batch.status = "running"
             batch.started_at = _dt.now()
-            await session.flush()
+            if is_peak_season():
+                batch.job_name = (batch.job_name or "") + " [繁忙期]"
+            await session.commit()
 
-            for did in doc_ids:
-                try:
-                    await _process_document(did, session, client_id=client_id)
-                    batch.processed_files += 1
-                except Exception as exc:
-                    logger.error("バッチ処理エラー doc=%s: %s", did, exc)
-                    batch.failed_files += 1
-                await session.flush()
+        results = await asyncio.gather(*[_process_one(did) for did in doc_ids])
 
+        async with AsyncSessionLocal() as session:
+            batch = (await session.execute(
+                _sel(BatchJob).where(BatchJob.id == job_id)
+            )).scalar_one()
+            batch.processed_files = sum(1 for ok in results if ok)
+            batch.failed_files = sum(1 for ok in results if not ok)
             batch.status = "completed"
             batch.completed_at = _dt.now()
             await session.commit()
@@ -602,6 +635,11 @@ async def batch_upload(
     return {
         "batch_job_id": str(job_id),
         "total_files": len(files),
+        "concurrency": effective_batch_concurrency(
+            settings.batch_concurrency,
+            settings.batch_concurrency_peak,
+        ),
+        "peak_season": is_peak_season(),
         "message": f"{len(files)} 件を受け付けました。バックグラウンドで処理中です。",
     }
 

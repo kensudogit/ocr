@@ -53,6 +53,8 @@ class AzureDocumentIntelligenceClient:
             return settings.azure_di_model_invoice
         if doc_type_hint in ("receipt", "handwritten"):
             return settings.azure_di_model_receipt
+        if doc_type_hint in ("card_statement",):
+            return settings.azure_di_model_card
         return settings.azure_di_model_default
 
     async def analyze(
@@ -230,6 +232,8 @@ class AzureDocumentIntelligenceClient:
         text = azure.content.lower()
         if "請求" in azure.content or "invoice" in text:
             result["doc_type"] = "invoice"
+        elif "カード" in azure.content or "利用明細" in azure.content:
+            result["doc_type"] = "card_statement"
         elif "領収" in azure.content or "receipt" in text:
             result["doc_type"] = "receipt"
         else:

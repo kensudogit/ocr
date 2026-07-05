@@ -152,11 +152,14 @@ class TestBatchUpload:
 
     @pytest.mark.asyncio
     async def test_batch_upload_too_many_files_returns_400(self, sample_jpg_file):
-        """200ファイル超のバッチアップロードは 400 を返すこと。"""
+        """batch_max_files 超のバッチアップロードは 400 を返すこと。"""
+        from src.config import settings
+
+        limit = settings.batch_max_files
         filename, content, content_type = sample_jpg_file
         files = [
             ("files", (f"receipt_{i}.jpg", content, content_type))
-            for i in range(201)
+            for i in range(limit + 1)
         ]
 
         async with AsyncClient(

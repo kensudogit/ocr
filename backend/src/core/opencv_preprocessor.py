@@ -13,6 +13,10 @@ from dataclasses import dataclass, field
 import numpy as np
 from PIL import Image, ImageOps
 
+from src.core.practice_profile import (
+    estimate_doc_type_from_image,
+    preprocess_profile_for,
+)
 from src.core.preprocessor import ImagePreprocessor, PreprocessResult
 
 logger = logging.getLogger(__name__)
@@ -73,8 +77,18 @@ class OpenCvPreprocessor:
             logger.debug("OpenCV 未インストール — PIL 前処理を使用")
             return self._pil_fallback.process(image_input, doc_type_hint)
 
+        # 書類種別未指定時: 軽量 PIL 前処理で画像特徴から推定
+        if doc_type_hint is None:
+            quick = self._pil_fallback.process(image_input)
+            doc_type_hint, est_conf = estimate_doc_type_from_image(quick)
+            if est_conf >= 0.4:
+                logger.debug("画像特徴から書類種別推定: %s (%.2f)", doc_type_hint, est_conf)
+
+        profile = preprocess_profile_for(doc_type_hint)
         cv2 = _get_cv2()
         applied: list[str] = []
+        if doc_type_hint:
+            applied.append(f"profile:{doc_type_hint}")
 
         try:
             pil = Image.open(io.BytesIO(image_input))
@@ -95,9 +109,13 @@ class OpenCvPreprocessor:
                 )
                 applied.append(f"upscale_{scale:.1f}x")
 
-            # ノイズ除去
+            is_wrinkled = self._detect_wrinkles(cv2, gray)
+            if is_wrinkled:
+                applied.append("wrinkle_detected")
+
+            # ノイズ除去（書類種別プロファイル）
             gray = cv2.fastNlMeansDenoising(
-                gray, None, self.config.denoise_strength, 7, 21
+                gray, None, profile.denoise_strength, 7, 21
             )
             applied.append("nlmeans_denoise")
 
@@ -107,9 +125,9 @@ class OpenCvPreprocessor:
                 gray = self._rotate(cv2, gray, angle)
                 applied.append(f"deskew_{angle:.1f}deg")
 
-            # CLAHE（コントラスト強調）
+            # CLAHE（感熱紙・薄い文字向けに書類別 clip）
             clahe = cv2.createCLAHE(
-                clipLimit=self.config.clahe_clip_limit,
+                clipLimit=profile.clahe_clip_limit,
                 tileGridSize=(
                     self.config.clahe_grid_size,
                     self.config.clahe_grid_size,
@@ -118,42 +136,60 @@ class OpenCvPreprocessor:
             gray = clahe.apply(gray)
             applied.append("clahe")
 
-            # 適応的二値化
-            block = self.config.adaptive_block_size
-            if block % 2 == 0:
-                block += 1
-            binary = cv2.adaptiveThreshold(
-                gray,
-                255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                block,
-                self.config.adaptive_c,
-            )
-            applied.append("adaptive_threshold")
+            # 皺補正（形態学的クロージング）
+            if profile.wrinkle_morph_close or is_wrinkled:
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                gray = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+                applied.append("morph_close")
+
+            # 二値化（手書きはスキップしてグレースケールを維持）
+            if profile.use_binarization:
+                block = profile.adaptive_block_size
+                if block % 2 == 0:
+                    block += 1
+                output = cv2.adaptiveThreshold(
+                    gray,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    block,
+                    profile.adaptive_c,
+                )
+                applied.append("adaptive_threshold")
+            else:
+                output = gray
+                applied.append("grayscale_preserve")
 
             # 余白
-            binary = cv2.copyMakeBorder(
-                binary, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255
+            output = cv2.copyMakeBorder(
+                output, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255
             )
             applied.append("border")
 
-            pil_out = Image.fromarray(binary)
-            confidence = self._estimate_quality(binary)
+            pil_out = Image.fromarray(output)
+            confidence = self._estimate_quality(output)
 
             return PreprocessResult(
-                image=binary,
+                image=output,
                 pil_image=pil_out,
                 applied_steps=applied,
                 skew_angle=angle,
                 original_size=original_size,
-                final_size=(binary.shape[0], binary.shape[1]),
+                final_size=(output.shape[0], output.shape[1]),
                 is_thermal_paper=self._detect_thermal(gray),
                 confidence=confidence,
             )
         except Exception as exc:
             logger.warning("OpenCV 前処理失敗 — PIL にフォールバック: %s", exc)
             return self._pil_fallback.process(image_input, doc_type_hint)
+
+    @staticmethod
+    def _detect_wrinkles(cv2, gray: np.ndarray) -> bool:
+        """皺・折れ目の有無をラプラシアン分散で推定。"""
+        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        variance = float(lap.var())
+        # 低分散 = ぼやけ/均一、中〜高 = 皺・エッジ多
+        return variance > 800 and variance < 8000
 
     def _estimate_skew(self, cv2, gray: np.ndarray) -> float:
         """Hough 変換で傾き角度を推定。"""

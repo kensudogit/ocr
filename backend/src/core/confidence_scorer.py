@@ -21,7 +21,8 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 
-from src.core.extractor import ExtractedFields
+from src.config import settings
+from src.core.practice_profile import should_force_review
 
 
 class ConfidenceTier(str, Enum):
@@ -83,6 +84,7 @@ class ConfidenceScorer:
         vlm_confidence: float = 0.0,
         rule_confidence: float = 0.0,
         ocr_engine_confidence: float = 0.0,
+        doc_type: str | None = None,
     ) -> ScoringResult:
         """統合スコアを計算して 3段階に分類する。
 
@@ -91,6 +93,7 @@ class ConfidenceScorer:
             vlm_confidence:         VLM の全体信頼度
             rule_confidence:        ルールエンジンのマッチ信頼度
             ocr_engine_confidence:  OCR エンジンの信頼度
+            doc_type:               書類種別（手書き等は自動承認を抑制）
 
         Returns:
             ScoringResult: スコア・ティア・フラグ
@@ -177,6 +180,18 @@ class ConfidenceScorer:
         # 検算失敗は必ず NEEDS_REVIEW 以上にする
         if not arithmetic_ok and diff > 10 and tier == ConfidenceTier.AUTO_CONFIRMED:
             tier = ConfidenceTier.NEEDS_REVIEW
+
+        # 税理士事務所向け: 手書き・カード明細は自動承認しない
+        if tier == ConfidenceTier.AUTO_CONFIRMED and doc_type:
+            if settings.require_review_handwritten and doc_type == "handwritten":
+                tier = ConfidenceTier.NEEDS_REVIEW
+                reasons.append("手書き領収書のため担当者確認が必要です")
+            elif settings.require_review_card_statement and doc_type == "card_statement":
+                tier = ConfidenceTier.NEEDS_REVIEW
+                reasons.append("カード明細のため担当者確認が必要です")
+            elif should_force_review(doc_type) and doc_type == "bank_statement":
+                tier = ConfidenceTier.NEEDS_REVIEW
+                reasons.append("通帳・銀行明細のため担当者確認が必要です")
 
         return ScoringResult(
             tier=tier,

@@ -12,21 +12,23 @@ import time
 from dataclasses import dataclass
 
 from src.config import settings
+from src.core.practice_profile import openai_context_for_doc_type
 from src.core.extractor import ExtractedFields
 from src.core.vlm_extractor import VlmExtractor
 
 logger = logging.getLogger(__name__)
 
-_CORRECTION_SYSTEM = """\
-あなたは日本の税理士事務所向け OCR 後処理 AI です。
+_CORRECTION_SYSTEM_BASE = """\
+あなたは日本の地方中規模税理士事務所（記帳代行・月500枚以上）向け OCR 後処理 AI です。
 OCR 全文テキストと機械抽出された初期値を照合し、正確な仕訳 JSON を出力してください。
 
-ルール:
+共通ルール:
 - 金額は数値のみ（カンマ・¥ 不要）
 - 日付は YYYY-MM-DD（和暦は西暦に変換）
 - 適格請求書番号は T + 13桁（14文字）
 - OCR テキストに根拠がない値は null（推測しない）
 - 合計 = 税抜 + 税 の整合性を確認し、矛盾があれば OCR テキストを優先
+- 顧問先の機密情報 — テキストにない口座番号・個人番号を捏造しない
 - JSON のみ返答
 
 出力フィールド:
@@ -36,6 +38,11 @@ tax_amount_10, tax_amount_8, invoice_number, payment_method,
 doc_type, account_title_suggestion, tax_category_suggestion,
 note, line_items, confidence_hint, correction_notes
 """
+
+
+def _build_system_prompt(doc_type: str | None) -> str:
+    ctx = openai_context_for_doc_type(doc_type)
+    return f"{_CORRECTION_SYSTEM_BASE}\n\n書類種別ヒント: {ctx}"
 
 
 @dataclass
@@ -78,6 +85,7 @@ class OpenAiPostProcessor:
         self,
         ocr_text: str,
         draft: dict,
+        doc_type: str | None = None,
     ) -> PostProcessResult | None:
         """OCR テキストと初期抽出 dict を OpenAI で補正。"""
         client = self._get_client()
@@ -101,7 +109,7 @@ class OpenAiPostProcessor:
                 lambda: client.chat.completions.create(
                     model=settings.openai_postprocess_model,
                     messages=[
-                        {"role": "system", "content": _CORRECTION_SYSTEM},
+                        {"role": "system", "content": _build_system_prompt(doc_type)},
                         {
                             "role": "user",
                             "content": (

@@ -23,6 +23,7 @@ from src.core.azure_document_intelligence import (
     normalize_registration_no,
     parse_date_value,
 )
+from src.core.practice_profile import estimate_doc_type_from_image
 from src.core.extractor import DataExtractor, ExtractedFields
 from src.core.openai_postprocessor import OpenAiPostProcessor
 from src.core.opencv_preprocessor import OpenCvPreprocessor, opencv_available
@@ -94,6 +95,14 @@ class EnhancedOcrPipeline:
             prep = self._pil.process(image_bytes, doc_type_hint)
             steps.append("pil_preprocess")
 
+        # 書類種別推定（画像特徴 + 呼び出し元ヒント）
+        effective_doc_type = doc_type_hint
+        if not effective_doc_type:
+            estimated, est_conf = estimate_doc_type_from_image(prep)
+            if est_conf >= 0.35:
+                effective_doc_type = estimated
+                steps.append(f"doc_type_estimated:{estimated}")
+
         # 前処理済み PNG バイト（Azure 送信用）
         buf = io.BytesIO()
         prep.pil_image.save(buf, format="PNG")
@@ -111,7 +120,7 @@ class EnhancedOcrPipeline:
             azure_result = await self._azure.analyze(
                 processed_bytes,
                 content_type="image/png",
-                doc_type_hint=doc_type_hint,
+                doc_type_hint=effective_doc_type,
             )
             if azure_result:
                 steps.append(f"azure_di:{azure_result.model_id}")
@@ -130,13 +139,17 @@ class EnhancedOcrPipeline:
             and settings.use_openai_postprocess
             and ocr_text.strip()
         ):
-            post = await self._postprocessor.refine(ocr_text, draft)
+            post = await self._postprocessor.refine(
+                ocr_text, draft, doc_type=effective_doc_type
+            )
             if post:
                 steps.append(f"openai_postprocess:{post.model_used}")
                 elapsed = (time.perf_counter() - start) * 1000
                 raw = post.raw_json
                 raw["ocr_engine"] = "opencv+azure+openai"
                 raw["pipeline_steps"] = steps
+                if effective_doc_type:
+                    raw["doc_type"] = raw.get("doc_type") or effective_doc_type
                 if post.correction_notes:
                     raw["correction_notes"] = post.correction_notes
                 return EnhancedOcrResult(
@@ -156,10 +169,12 @@ class EnhancedOcrPipeline:
             steps.append("rule_mapping")
             fields = self._draft_to_fields(draft)
             if not fields.total_amount or not fields.vendor_name:
-                ext = self._extractor.extract(ocr_text, doc_type_hint)
+                ext = self._extractor.extract(ocr_text, effective_doc_type)
                 fields = self._merge_fields(fields, ext)
 
             elapsed = (time.perf_counter() - start) * 1000
+            if effective_doc_type:
+                draft["doc_type"] = draft.get("doc_type") or effective_doc_type
             draft["pipeline_steps"] = steps
             return EnhancedOcrResult(
                 fields=fields,
@@ -175,7 +190,9 @@ class EnhancedOcrPipeline:
         # ── Step 4: VLM フォールバック ───────────────────────────
         steps.append("vlm_fallback")
         vlm: VlmExtractionResult = await self._vlm.extract(
-            prep.pil_image, client_id=client_id, doc_type_hint=doc_type_hint
+            prep.pil_image,
+            client_id=client_id,
+            doc_type_hint=effective_doc_type,
         )
         elapsed = (time.perf_counter() - start) * 1000
         raw = dict(vlm.raw_json)

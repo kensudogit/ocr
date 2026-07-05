@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     google_vision_project_id: str = ""
     ocr_language: str = "ja"
 
+    # ── 実務プロファイル（税理士事務所向け） ─────────────────────
+    # "tax_firm" : 地方中規模税理士事務所（月500枚+・高セキュリティ）
+    # "generic"  : 汎用設定
+    practice_profile: str = "tax_firm"
+    batch_max_files: int = 500          # 一括アップロード上限（月500枚+対応）
+    batch_concurrency: int = 3          # 通常月の並列 OCR 数
+    batch_concurrency_peak: int = 5     # 確定申告期（2〜3月）の並列 OCR 数
+    require_review_handwritten: bool = True   # 手書きは自動承認しない
+    require_review_card_statement: bool = True  # カード明細は要確認を推奨
+
     # ── 認識率向上パイプライン（OpenCV + Azure DI + OpenAI） ─────
     # "hybrid"       : OpenCV → Azure DI → OpenAI 後処理（推奨）
     # "azure_openai" : Azure DI + OpenAI のみ（OpenCV 前処理あり）
@@ -78,6 +88,7 @@ class Settings(BaseSettings):
     azure_di_model_default: str = "prebuilt-read"
     azure_di_model_invoice: str = "prebuilt-invoice"
     azure_di_model_receipt: str = "prebuilt-receipt"
+    azure_di_model_card: str = "prebuilt-read"  # カード明細は read モデル
 
     # OpenAI 後処理モデル（テキスト補正用 — Vision より低コスト）
     openai_postprocess_model: str = "gpt-4o-mini"
@@ -112,7 +123,8 @@ class Settings(BaseSettings):
     # "bedrock": AWS Bedrock（東京/大阪リージョン、データ国内）
     # "vertex" : Google Vertex AI（日本リージョン、データ国内）
     # "onprem" : 完全ローカル（PaddleOCR + Ollama）
-    ai_deployment_mode: str = "cloud"
+    # "hybrid" : ローカルPIIマスク → クラウドAI（税理士事務所向け推奨）
+    ai_deployment_mode: str = "hybrid"
 
     # ── AWS Bedrock（オンプレ・国内固定構成） ───────────────────────
     aws_region: str = "ap-northeast-1"        # 東京リージョン（大阪: ap-northeast-3）
